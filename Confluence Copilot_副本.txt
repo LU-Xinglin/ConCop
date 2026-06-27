@@ -226,3 +226,18 @@ if __name__ == "__main__":
         with open(f"confluence_{SPACE_KEY}.json", "w", encoding="utf-8") as f:
             json.dump(kb_data, f, ensure_ascii=False, indent=4)
         print("成功保存文件！")
+
+#V5
+import requests
+import urllib3
+urllib3.disable_warnings()
+
+BASE_URL = "https://confluence.system.uk.hsbc/confluence"
+HEADERS = {"Authorization": "Bearer 你的token"}
+
+def get_space(space_key):
+    url = f"{BASE_URL}/rest/api/space/{space_key}"
+    result = requests.get(url, headers=HEADERS, verify=False)
+    return result.json()
+
+print(get_space("AGRCKB"))
