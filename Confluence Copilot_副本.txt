@@ -105,3 +105,68 @@ if __name__ == "__main__":
         raw_html = page.get('body', {}).get('storage', {}).get('value', '')
         print(f"\n--- 页面 {i+1}: {title} ---")
         print(raw_html[:200] + "... (截断)")
+
+
+
+
+
+
+# V2:
+import json
+import urllib3
+from atlassian import Confluence
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 配置参数
+CONFLUENCE_URL = "https://alm-confluence.system.uk.jpm/confluence"
+SPACE_KEY = "AGRCKB"
+USERNAME = "your_username"          
+PASSWORD = "your_token_or_password" 
+
+def fetch_all_pages(space_key):
+    confluence = Confluence(
+        url=CONFLUENCE_URL, username=USERNAME, password=PASSWORD, verify_ssl=False
+    )
+    
+    all_pages = []
+    start = 0
+    limit = 50
+    
+    print(f"开始抓取 Space [{space_key}]...")
+    while True:
+        pages = confluence.get_all_pages_from_space(
+            space=space_key, start=start, limit=limit, expand='body.storage'
+        )
+        if not pages:
+            break
+        all_pages.extend(pages)
+        print(f"已获取 {len(all_pages)} 个页面...")
+        
+        if len(pages) < limit:
+            break
+        start += limit
+        
+    return all_pages
+
+if __name__ == "__main__":
+    try:
+        raw_data = fetch_all_pages(SPACE_KEY)
+        
+        # 提取核心字段并清洗结构
+        kb_data = [{
+            "page_id": p.get('id'),
+            "title": p.get('title'),
+            "url": f"{CONFLUENCE_URL}/pages/viewpage.action?pageId={p.get('id')}",
+            "raw_html": p.get('body', {}).get('storage', {}).get('value', '')
+        } for p in raw_data]
+        
+        # 保存为本地 JSON
+        output_file = f"confluence_{SPACE_KEY}_kb.json"
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(kb_data, f, ensure_ascii=False, indent=4)
+            
+        print(f"\n[成功] 抓取完成！共 {len(kb_data)} 个页面，数据已写入: {output_file}")
+        
+    except Exception as e:
+        print(f"\n[运行中断] 发生异常: {e}")
