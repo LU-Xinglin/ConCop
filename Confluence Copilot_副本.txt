@@ -1,3 +1,4 @@
+'''
 import os
 import urllib3
 from atlassian import Confluence
@@ -105,7 +106,7 @@ if __name__ == "__main__":
         raw_html = page.get('body', {}).get('storage', {}).get('value', '')
         print(f"\n--- 页面 {i+1}: {title} ---")
         print(raw_html[:200] + "... (截断)")
-
+'''
 
 
 
@@ -170,3 +171,58 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"\n[运行中断] 发生异常: {e}")
+
+
+#V3
+import os, json, requests, urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 配置
+CONFLUENCE_URL = "https://alm-confluence.system.uk.hsbc/confluence"
+SPACE_KEY = "AGRCKB"
+TOKEN = "your_token_here" 
+
+# 强设代理
+os.environ["http_proxy"] = "http://111.1.111.11:111"
+os.environ["https_proxy"] = "http://111.1.111.11:111"
+os.environ.pop("no_proxy", None)
+
+def fetch_space():
+    url = f"{CONFLUENCE_URL}/rest/api/content"
+    headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
+    all_pages, start, limit = [], 0, 50
+    
+    print(f"开始抓取 Space [{SPACE_KEY}]...")
+    while True:
+        params = {"spaceKey": SPACE_KEY, "start": start, "limit": limit, "type": "page", "expand": "body.storage"}
+        res = requests.get(url, headers=headers, params=params, verify=False)
+        
+        if res.status_code != 200:
+            print(f"失败 (状态码 {res.status_code}): {res.text[:200]}")
+            break
+            
+        data = res.json()
+        pages = data.get("results", [])
+        if not pages:
+            break
+            
+        all_pages.extend([{
+            "id": p.get("id"),
+            "title": p.get("title"),
+            "html": p.get("body", {}).get("storage", {}).get("value", "")
+        } for p in pages])
+        
+        print(f"已获取 {len(all_pages)} 个页面...")
+        if "next" not in data.get("_links", {}):
+            break
+        start += limit
+        
+    return all_pages
+
+if __name__ == "__main__":
+    kb_data = fetch_space()
+    if kb_data:
+        with open(f"confluence_{SPACE_KEY}.json", "w", encoding="utf-8") as f:
+            json.dump(kb_data, f, ensure_ascii=False, indent=4)
+        print("成功保存文件！")
