@@ -241,3 +241,36 @@ def get_space(space_key):
     return result.json()
 
 print(get_space("AGRCKB"))
+
+
+#V6
+def get_all_pages(space_key):
+    pages = []
+    start = 0
+    limit = 50
+    
+    while True:
+        url = f"{BASE_URL}/rest/api/content"
+        params = {
+            "spaceKey": space_key,
+            "type": "page",
+            "status": "current",
+            "expand": "body.storage",
+            "start": start,
+            "limit": limit
+        }
+        result = requests.get(url, headers=HEADERS, params=params, verify=r"C:\Users\45451061\certs\hsbc-orca-g2.pem")
+        data = result.json()
+        
+        pages.extend(data["results"])
+        
+        if start + limit >= data["size"]:
+            break
+        start += limit
+    
+    return pages
+
+pages = get_all_pages("AGRCKB")
+print(f"共找到 {len(pages)} 个页面")
+for p in pages:
+    print(p["title"])
