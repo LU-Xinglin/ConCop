@@ -299,3 +299,15 @@ def save_knowledge_base(pages, output_file="knowledge_base.txt"):
 
 save_knowledge_base(pages)
 print("知识库已保存到 knowledge_base.txt")
+
+#V8
+def save_knowledge_base_docx(pages, output_file="knowledge_base.docx"):
+    doc = Document()
+    for page in pages:
+        extracted = extract_text_from_page(page)
+        doc.add_heading(extracted["title"], level=1)
+        doc.add_paragraph(extracted["content"])
+        doc.add_page_break()
+    doc.save(output_file)
+
+save_knowledge_base_docx(pages)
