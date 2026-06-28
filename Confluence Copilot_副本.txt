@@ -361,3 +361,60 @@ pages = get_all_pages("AGRCKB")
 print(f"共找到 {len(pages)} 个页面")
 save_docx(pages)
 print("知识库已保存到 knowledge_base.docx")
+
+
+#V9
+import requests
+import urllib3
+from bs4 import BeautifulSoup
+from docx import Document
+
+urllib3.disable_warnings()
+
+BASE_URL = "https://alm-confluence.systems.uk.hsbc/confluence"
+CERT = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"
+
+session = requests.Session()
+session.headers.update({"Authorization": "Bearer 111"})
+session.verify = CERT
+
+def get_space(space_key):
+    return session.get(f"{BASE_URL}/rest/api/space/{space_key}").json()
+
+def get_all_pages(space_key):
+    pages, start, limit = [], 0, 50
+    while True:
+        data = session.get(f"{BASE_URL}/rest/api/content", params={
+            "spaceKey": space_key, "type": "page", "status": "current",
+            "expand": "body.storage,ancestors",
+            "start": start, "limit": limit
+        }).json()
+        pages.extend(data["results"])
+        if start + limit >= data["size"]:
+            break
+        start += limit
+    return pages
+
+def extract_text(page):
+    soup = BeautifulSoup(page["body"]["storage"]["value"], "html.parser")
+    return {"title": page["title"], "content": soup.get_text(separator="\n", strip=True)}
+
+def get_heading_level(page):
+    return min(len(page.get("ancestors", [])), 4)
+
+def save_docx(pages, output_file="knowledge_base.docx"):
+    doc = Document()
+    pages_sorted = sorted(pages, key=lambda p: len(p.get("ancestors", [])))
+    for page in pages_sorted:
+        p = extract_text(page)
+        level = get_heading_level(page)
+        doc.add_heading(p["title"], level=level)
+        for line in p["content"].split("\n"):
+            if line.strip():
+                doc.add_paragraph(line.strip())
+    doc.save(output_file)
+
+pages = get_all_pages("AGRCKB")
+print(f"共找到 {len(pages)} 个页面")
+save_docx(pages)
+print("知识库已保存到 knowledge_base.docx")
