@@ -311,3 +311,53 @@ def save_knowledge_base_docx(pages, output_file="knowledge_base.docx"):
     doc.save(output_file)
 
 save_knowledge_base_docx(pages)
+
+
+#V8
+import requests
+import urllib3
+from bs4 import BeautifulSoup
+from docx import Document
+
+urllib3.disable_warnings()
+
+BASE_URL = "https://alm-confluence.systems.uk.hsbc/confluence"
+CERT = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"
+
+session = requests.Session()
+session.headers.update({"Authorization": "Bearer 111"})
+session.verify = CERT
+
+def get_space(space_key):
+    return session.get(f"{BASE_URL}/rest/api/space/{space_key}").json()
+
+def get_all_pages(space_key):
+    pages, start, limit = [], 0, 50
+    while True:
+        data = session.get(f"{BASE_URL}/rest/api/content", params={
+            "spaceKey": space_key, "type": "page", "status": "current",
+            "expand": "body.storage", "start": start, "limit": limit
+        }).json()
+        pages.extend(data["results"])
+        if start + limit >= data["size"]:
+            break
+        start += limit
+    return pages
+
+def extract_text(page):
+    soup = BeautifulSoup(page["body"]["storage"]["value"], "html.parser")
+    return {"title": page["title"], "content": soup.get_text(separator="\n", strip=True)}
+
+def save_docx(pages, output_file="knowledge_base.docx"):
+    doc = Document()
+    for page in pages:
+        p = extract_text(page)
+        doc.add_heading(p["title"], level=1)
+        doc.add_paragraph(p["content"])
+        doc.add_page_break()
+    doc.save(output_file)
+
+pages = get_all_pages("AGRCKB")
+print(f"共找到 {len(pages)} 个页面")
+save_docx(pages)
+print("知识库已保存到 knowledge_base.docx")
