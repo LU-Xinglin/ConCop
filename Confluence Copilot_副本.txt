@@ -274,3 +274,28 @@ pages = get_all_pages("AGRCKB")
 print(f"共找到 {len(pages)} 个页面")
 for p in pages:
     print(p["title"])
+
+
+
+#V7
+from bs4 import BeautifulSoup
+
+def extract_text_from_page(page):
+    title = page["title"]
+    html_content = page["body"]["storage"]["value"]
+    soup = BeautifulSoup(html_content, "html.parser")
+    text = soup.get_text(separator="\n", strip=True)
+    return {"title": title, "content": text}
+
+def save_knowledge_base(pages, output_file="knowledge_base.txt"):
+    with open(output_file, "w", encoding="utf-8") as f:
+        for page in pages:
+            extracted = extract_text_from_page(page)
+            f.write(f"{'='*60}\n")
+            f.write(f"PAGE: {extracted['title']}\n")
+            f.write(f"{'='*60}\n")
+            f.write(extracted["content"])
+            f.write("\n\n")
+
+save_knowledge_base(pages)
+print("知识库已保存到 knowledge_base.txt")
