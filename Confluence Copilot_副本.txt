@@ -418,3 +418,297 @@ pages = get_all_pages("AGRCKB")
 print(f"共找到 {len(pages)} 个页面")
 save_docx(pages)
 print("知识库已保存到 knowledge_base.docx")
+
+
+#V10
+"""
+ConCop_export.py
+----------------
+Pulls every page from a Confluence space and concatenates them into a single
+Word document that mirrors Confluence's native Word-export quality.
+
+Key improvement over the original:
+  - Uses `body.export_view` instead of `body.storage`.
+    export_view returns clean, render-ready HTML (same source Confluence uses
+    for its own PDF/Word export), so tables, lists, bold/italic, headings,
+    and inline code are all preserved faithfully.
+  - Parses that HTML with BeautifulSoup and maps each element to the
+    correct python-docx construct (not just raw stripped text).
+
+Requirements:
+    pip install requests urllib3 python-docx beautifulsoup4 lxml
+"""
+
+import requests
+import urllib3
+from bs4 import BeautifulSoup, NavigableString, Tag
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+import copy
+
+urllib3.disable_warnings()
+
+# ── CONFIG ────────────────────────────────────────────────────────────────────
+BASE_URL   = "https://alm-confluence.systems.uk.hsbc/confluence"
+HEADERS    = {"Authorization": "Bearer YOUR_TOKEN_HERE"}
+CERT_PATH  = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"   # set to False to disable
+SPACE_KEY  = "AGRCKB"
+OUTPUT     = "knowledge_base.docx"
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def get_all_pages(space_key: str) -> list[dict]:
+    """Fetch all pages in the space with export_view body (mirrors native export)."""
+    pages, start, limit = [], 0, 50
+    while True:
+        url    = f"{BASE_URL}/rest/api/content"
+        params = {
+            "spaceKey": space_key,
+            "type":     "page",
+            "status":   "current",
+            "expand":   "body.export_view,ancestors",   # <-- KEY CHANGE
+            "start":    start,
+            "limit":    limit,
+        }
+        r    = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH)
+        data = r.json()
+        pages.extend(data["results"])
+        if start + limit >= data["size"]:
+            break
+        start += limit
+    return pages
+
+
+# ── HTML → DOCX converter ─────────────────────────────────────────────────────
+
+def _apply_inline_style(run, tag: Tag):
+    """Bold, italic, underline, code from the tag's own name / parent chain."""
+    names = {t.name for t in tag.parents if isinstance(t, Tag)} | {tag.name}
+    if names & {"strong", "b"}:
+        run.bold = True
+    if names & {"em", "i"}:
+        run.italic = True
+    if names & {"u"}:
+        run.underline = True
+    if names & {"code", "tt"}:
+        run.font.name = "Courier New"
+        run.font.size = Pt(10)
+
+
+def _add_text_runs(paragraph, node):
+    """Recursively walk a node, adding text runs with inline formatting."""
+    if isinstance(node, NavigableString):
+        text = str(node)
+        if text:
+            run = paragraph.add_run(text)
+            # Apply formatting from parent tags
+            for parent in node.parents:
+                if not isinstance(parent, Tag):
+                    break
+                n = parent.name
+                if n in ("strong", "b"):
+                    run.bold = True
+                if n in ("em", "i"):
+                    run.italic = True
+                if n == "u":
+                    run.underline = True
+                if n in ("code", "tt"):
+                    run.font.name = "Courier New"
+                    run.font.size = Pt(10)
+                if n in ("p", "li", "td", "th", "div"):
+                    break  # stop climbing past block elements
+    elif isinstance(node, Tag):
+        for child in node.children:
+            _add_text_runs(paragraph, child)
+
+
+def _heading_level(tag_name: str) -> int:
+    return int(tag_name[1])   # h1→1, h2→2, …
+
+
+def _process_table(doc: Document, table_tag: Tag):
+    """Convert an HTML <table> to a python-docx Table."""
+    rows_html = table_tag.find_all("tr")
+    if not rows_html:
+        return
+
+    # Determine column count from first row
+    first_row_cells = rows_html[0].find_all(["td", "th"])
+    n_cols = sum(int(c.get("colspan", 1)) for c in first_row_cells)
+    if n_cols == 0:
+        return
+
+    table = doc.add_table(rows=0, cols=n_cols)
+    table.style = "Table Grid"
+
+    for tr in rows_html:
+        cells_html = tr.find_all(["td", "th"])
+        row = table.add_row()
+        col_idx = 0
+        for cell_html in cells_html:
+            if col_idx >= n_cols:
+                break
+            cell = row.cells[col_idx]
+            # Bold header cells
+            is_header = cell_html.name == "th"
+            p = cell.paragraphs[0]
+            _add_text_runs(p, cell_html)
+            if is_header:
+                for run in p.runs:
+                    run.bold = True
+            col_idx += int(cell_html.get("colspan", 1))
+
+
+def _is_ordered(list_tag: Tag) -> bool:
+    return list_tag.name == "ol"
+
+
+def _process_list(doc: Document, list_tag: Tag, level: int = 0):
+    """Recursively process <ul>/<ol>, supporting nesting."""
+    ordered = _is_ordered(list_tag)
+    for li in list_tag.find_all("li", recursive=False):
+        # Add the list item paragraph
+        style = "List Number" if ordered else "List Bullet"
+        p = doc.add_paragraph(style=style)
+        p.paragraph_format.left_indent = Inches(0.25 * (level + 1))
+
+        # Add direct text content (skip nested lists for now)
+        for child in li.children:
+            if isinstance(child, NavigableString):
+                if str(child).strip():
+                    p.add_run(str(child))
+            elif isinstance(child, Tag) and child.name not in ("ul", "ol"):
+                _add_text_runs(p, child)
+
+        # Recurse into nested lists
+        for nested in li.find_all(["ul", "ol"], recursive=False):
+            _process_list(doc, nested, level + 1)
+
+
+def html_to_docx(doc: Document, html: str):
+    """
+    Parse export_view HTML and append its content to `doc`.
+    Handles: headings, paragraphs, bold/italic/underline/code,
+             ordered & unordered lists (nested), tables, <hr> dividers,
+             and <pre> / code blocks.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    body = soup.find("body") or soup
+
+    for element in body.children:
+        if isinstance(element, NavigableString):
+            continue
+        if not isinstance(element, Tag):
+            continue
+
+        tag = element.name
+
+        # ── Headings ──────────────────────────────────────────────────────
+        if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            level = _heading_level(tag)
+            heading_style = f"Heading {min(level, 4)}"
+            p = doc.add_paragraph(style=heading_style)
+            _add_text_runs(p, element)
+
+        # ── Paragraphs ────────────────────────────────────────────────────
+        elif tag == "p":
+            text = element.get_text(strip=True)
+            if not text:
+                continue
+            p = doc.add_paragraph()
+            _add_text_runs(p, element)
+
+        # ── Pre / code block ──────────────────────────────────────────────
+        elif tag == "pre":
+            p = doc.add_paragraph(style="No Spacing")
+            run = p.add_run(element.get_text())
+            run.font.name = "Courier New"
+            run.font.size = Pt(9)
+
+        # ── Unordered / ordered lists ─────────────────────────────────────
+        elif tag in ("ul", "ol"):
+            _process_list(doc, element, level=0)
+
+        # ── Tables ────────────────────────────────────────────────────────
+        elif tag == "table":
+            _process_table(doc, element)
+            doc.add_paragraph()   # breathing room after table
+
+        # ── Horizontal rule ───────────────────────────────────────────────
+        elif tag == "hr":
+            p = doc.add_paragraph()
+            pPr = p._p.get_or_add_pPr()
+            pBdr = OxmlElement("w:pBdr")
+            bottom = OxmlElement("w:bottom")
+            bottom.set(qn("w:val"), "single")
+            bottom.set(qn("w:sz"), "6")
+            bottom.set(qn("w:space"), "1")
+            bottom.set(qn("w:color"), "AAAAAA")
+            pBdr.append(bottom)
+            pPr.append(pBdr)
+
+        # ── Divs — recurse into them ──────────────────────────────────────
+        elif tag == "div":
+            html_to_docx(doc, str(element))
+
+
+# ── Main builder ──────────────────────────────────────────────────────────────
+
+def build_knowledge_base(pages: list[dict], output_file: str = OUTPUT):
+    doc = Document()
+
+    # Title page
+    title = doc.add_heading("Control Knowledge Base", level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Space: {SPACE_KEY} — auto-generated via Confluence export_view API")
+    doc.add_page_break()
+
+    # Optional: simple table of contents listing
+    doc.add_heading("Contents", level=1)
+    for i, page in enumerate(pages, 1):
+        doc.add_paragraph(f"{i}. {page['title']}", style="List Number")
+    doc.add_page_break()
+
+    # Page content
+    for page in pages:
+        print(f"  Processing: {page['title']}")
+
+        # Page title as H1
+        doc.add_heading(page["title"], level=1)
+
+        # Breadcrumb (ancestor path)
+        ancestors = page.get("ancestors", [])
+        if ancestors:
+            path = " › ".join(a["title"] for a in ancestors)
+            p = doc.add_paragraph(f"Path: {path}")
+            p.runs[0].font.color.rgb = RGBColor(0x70, 0x70, 0x70)
+            p.runs[0].font.size = Pt(9)
+
+        # Body — use export_view HTML
+        html_content = (
+            page.get("body", {})
+                .get("export_view", {})
+                .get("value", "")
+        )
+
+        if html_content.strip():
+            html_to_docx(doc, html_content)
+        else:
+            doc.add_paragraph("[No content]")
+
+        doc.add_page_break()
+
+    doc.save(output_file)
+    print(f"\n✅  Saved {len(pages)} pages → {output_file}")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print(f"Fetching all pages from space '{SPACE_KEY}' …")
+    pages = get_all_pages(SPACE_KEY)
+    print(f"Found {len(pages)} pages. Building document …\n")
+    build_knowledge_base(pages)
