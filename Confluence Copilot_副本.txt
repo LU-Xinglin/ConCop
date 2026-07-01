@@ -3652,3 +3652,433 @@ def download(job_id: str):
 if __name__ == "__main__":
     # host="0.0.0.0" makes it reachable from other machines on the same network
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+
+#index.html V1
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge Base Portal</title>
+  <style>
+    /* ── Tokens ── */
+    :root {
+      --bg:        #0a0f1e;
+      --surface:   #111827;
+      --border:    #1e2d45;
+      --accent:    #2563eb;
+      --accent-hi: #3b82f6;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --success:   #10b981;
+      --error:     #ef4444;
+      --mono:      "JetBrains Mono", "Fira Mono", monospace;
+      --sans:      "Inter", system-ui, sans-serif;
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 16px 80px;
+    }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent-hi);
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #fff;
+      line-height: 1.15;
+    }
+
+    h1 span {
+      color: var(--accent-hi);
+    }
+
+    .subtitle {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 420px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 36px 40px;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    /* ── Form ── */
+    .field {
+      margin-bottom: 24px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 11px 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+
+    .hint {
+      margin-top: 5px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 8px 0 28px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+
+    /* ── Button ── */
+    button[type="submit"] {
+      width: 100%;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 13px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      margin-top: 8px;
+    }
+
+    button[type="submit"]:hover:not(:disabled) {
+      background: var(--accent-hi);
+    }
+
+    button[type="submit"]:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Status panel ── */
+    #status-panel {
+      display: none;
+      margin-top: 28px;
+    }
+
+    .status-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-hi);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .status-text {
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .status-text.success { color: var(--success); }
+    .status-text.error   { color: var(--error);   }
+
+    /* ── Stats ── */
+    .stats {
+      display: flex;
+      gap: 24px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-value {
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent-hi);
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── Download button ── */
+    #download-btn {
+      display: none;
+      width: 100%;
+      background: var(--success);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 13px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: opacity 0.15s;
+      text-decoration: none;
+      text-align: center;
+    }
+
+    #download-btn:hover { opacity: 0.88; }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 48px;
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <p class="eyebrow">Business Management &amp; Control · Payments</p>
+    <h1>Knowledge Base <span>Portal</span></h1>
+    <p class="subtitle">
+      Export any Confluence space into a structured Word document, ready for querying.
+    </p>
+  </header>
+
+  <div class="card">
+    <form id="export-form">
+
+      <!-- Space config -->
+      <p class="section-label">Confluence Space</p>
+
+      <div class="field">
+        <label for="space_key">Space Key</label>
+        <input type="text" id="space_key" name="space_key"
+               placeholder="e.g. AGRCKB" autocomplete="off" required />
+        <p class="hint">Found in the URL: /confluence/spaces/<strong>AGRCKB</strong>/…</p>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- Auth -->
+      <p class="section-label">Authentication</p>
+
+      <div class="field">
+        <label for="token">Bearer Token</label>
+        <input type="password" id="token" name="token"
+               placeholder="Paste your personal access token" required />
+        <p class="hint">Generate one in Confluence → Profile → Personal Access Tokens.</p>
+      </div>
+
+      <div class="field">
+        <label for="cert_path">Certificate Path <span style="font-weight:400;text-transform:none;">(optional)</span></label>
+        <input type="text" id="cert_path" name="cert_path"
+               placeholder="e.g. C:\Users\...\certs\hsbc-orca-g2.pem" />
+        <p class="hint">Leave blank to skip certificate verification.</p>
+      </div>
+
+      <button type="submit" id="submit-btn">Generate Knowledge Base</button>
+
+    </form>
+
+    <!-- Status panel (shown after submit) -->
+    <div id="status-panel">
+      <div class="status-box">
+        <div class="status-row">
+          <div class="spinner" id="spinner"></div>
+          <span class="status-text" id="status-text">Starting export…</span>
+        </div>
+        <div class="stats" id="stats" style="display:none;">
+          <div class="stat">
+            <span class="stat-value" id="stat-pages">—</span>
+            <span class="stat-label">Pages</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="stat-links">—</span>
+            <span class="stat-label">Links in appendix</span>
+          </div>
+        </div>
+      </div>
+      <a id="download-btn" href="#">⬇ Download Word Document</a>
+    </div>
+
+  </div>
+
+  <footer>
+    Powered by Confluence REST API · export_view · python-docx
+  </footer>
+
+  <script>
+    const form        = document.getElementById("export-form");
+    const submitBtn   = document.getElementById("submit-btn");
+    const statusPanel = document.getElementById("status-panel");
+    const statusText  = document.getElementById("status-text");
+    const spinner     = document.getElementById("spinner");
+    const statsDiv    = document.getElementById("stats");
+    const statPages   = document.getElementById("stat-pages");
+    const statLinks   = document.getElementById("stat-links");
+    const downloadBtn = document.getElementById("download-btn");
+
+    let pollInterval = null;
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      // Reset UI
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Exporting…";
+      statusPanel.style.display = "block";
+      statusText.className = "status-text";
+      statusText.textContent = "Connecting to Confluence…";
+      spinner.style.display = "block";
+      statsDiv.style.display = "none";
+      downloadBtn.style.display = "none";
+
+      const formData = new FormData(form);
+
+      let jobId;
+      try {
+        const res  = await fetch("/export", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        jobId = data.job_id;
+      } catch (err) {
+        showError(err.message);
+        return;
+      }
+
+      // Poll for status every 2 s
+      pollInterval = setInterval(() => poll(jobId), 2000);
+    });
+
+    async function poll(jobId) {
+      try {
+        const res  = await fetch(`/status/${jobId}`);
+        const data = await res.json();
+
+        if (data.status === "running") {
+          statusText.textContent = data.message || "Export in progress…";
+          return;
+        }
+
+        clearInterval(pollInterval);
+
+        if (data.status === "done") {
+          spinner.style.display = "none";
+          statusText.className = "status-text success";
+          statusText.textContent = "✓ " + data.message;
+
+          statPages.textContent = data.pages ?? "—";
+          statLinks.textContent = data.links ?? "—";
+          statsDiv.style.display = "flex";
+
+          downloadBtn.href = `/download/${jobId}`;
+          downloadBtn.style.display = "block";
+
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Generate Again";
+
+        } else {
+          showError(data.message || "Unknown error.");
+        }
+
+      } catch (err) {
+        clearInterval(pollInterval);
+        showError("Lost connection to server.");
+      }
+    }
+
+    function showError(msg) {
+      clearInterval(pollInterval);
+      spinner.style.display = "none";
+      statusText.className = "status-text error";
+      statusText.textContent = "✗ " + msg;
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Generate Knowledge Base";
+    }
+  </script>
+
+</body>
+</html>
