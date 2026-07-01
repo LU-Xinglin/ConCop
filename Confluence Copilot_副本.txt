@@ -3502,3 +3502,153 @@ if __name__ == "__main__":
     pages = get_all_pages(SPACE_KEY)
     print(f"Found {len(pages)} pages. Building document …\n")
     build_knowledge_base(pages)
+
+
+
+
+
+#app.py V1
+"""
+app.py  —  Confluence Knowledge Base Portal
+--------------------------------------------
+Runs a lightweight Flask web server that lets colleagues trigger a
+Confluence space export and download the resulting Word document.
+
+Usage:
+    pip install flask requests urllib3 python-docx beautifulsoup4 lxml
+    python app.py
+
+Then open http://<your-machine-ip>:5000 in a browser on the internal network.
+"""
+
+import os
+import uuid
+import threading
+from datetime import datetime
+from flask import Flask, render_template, request, jsonify, send_file, abort
+
+# Import the export logic from ConCop_export.py (same folder)
+import ConCop_export as exporter
+
+app = Flask(__name__)
+
+# ── Output folder (all generated docs land here) ───────────────────────────────
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "generated")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# ── In-memory job tracker ──────────────────────────────────────────────────────
+# { job_id: { "status": "running"|"done"|"error", "file": path, "message": str } }
+jobs: dict[str, dict] = {}
+jobs_lock = threading.Lock()
+
+
+def run_export(job_id: str, space_key: str, token: str, cert_path: str):
+    """
+    Background thread: runs the Confluence export and updates the job record.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename  = f"{space_key}_{timestamp}.docx"
+    filepath  = os.path.join(OUTPUT_DIR, filename)
+
+    try:
+        # Patch the exporter's runtime config for this request
+        exporter.BASE_URL   = exporter.BASE_URL          # keep default
+        exporter.HEADERS    = {"Authorization": f"Bearer {token}"}
+        exporter.CERT_PATH  = cert_path if cert_path else False
+        exporter.SPACE_KEY  = space_key
+        exporter.OUTPUT     = filepath
+
+        pages = exporter.get_all_pages(space_key)
+        if not pages:
+            raise ValueError(f"No pages found in space '{space_key}'. "
+                             "Check the space key and token permissions.")
+
+        exporter.build_knowledge_base(pages, output_file=filepath)
+
+        with jobs_lock:
+            jobs[job_id] = {
+                "status":  "done",
+                "file":    filepath,
+                "filename": filename,
+                "pages":   len(pages),
+                "links":   len(exporter._LINK_REGISTRY),
+                "message": f"Export complete — {len(pages)} pages, "
+                           f"{len(exporter._LINK_REGISTRY)} links collected.",
+            }
+
+    except Exception as e:
+        with jobs_lock:
+            jobs[job_id] = {
+                "status":  "error",
+                "message": str(e),
+            }
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/export", methods=["POST"])
+def start_export():
+    """
+    Accepts form data, kicks off a background export job, returns the job ID.
+    """
+    space_key = request.form.get("space_key", "").strip().upper()
+    token     = request.form.get("token", "").strip()
+    cert_path = request.form.get("cert_path", "").strip()
+
+    if not space_key:
+        return jsonify({"error": "Space key is required."}), 400
+    if not token:
+        return jsonify({"error": "Bearer token is required."}), 400
+
+    job_id = str(uuid.uuid4())
+    with jobs_lock:
+        jobs[job_id] = {"status": "running", "message": "Export started…"}
+
+    thread = threading.Thread(
+        target=run_export,
+        args=(job_id, space_key, token, cert_path),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/status/<job_id>")
+def job_status(job_id: str):
+    """Polled by the front-end every 2 s to check progress."""
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found."}), 404
+    return jsonify(job)
+
+
+@app.route("/download/<job_id>")
+def download(job_id: str):
+    """Serves the generated .docx file as a download."""
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job or job.get("status") != "done":
+        abort(404)
+    filepath = job.get("file")
+    if not filepath or not os.path.exists(filepath):
+        abort(404)
+    return send_file(
+        filepath,
+        as_attachment=True,
+        download_name=job.get("filename", "knowledge_base.docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # host="0.0.0.0" makes it reachable from other machines on the same network
+    app.run(host="0.0.0.0", port=5000, debug=False)
