@@ -4654,3 +4654,38 @@ def run_export(job_id: str, space_key: str, token: str, cert_path: str, page_lim
 
 
 pages = exporter.get_all_pages(space_key, limit=page_limit)
+
+
+
+
+def get_all_pages(space_key: str, limit: int = 0) -> list[dict]:
+    """
+    Fetch pages from the space with export_view body.
+    limit: max number of pages to fetch. 0 means fetch all.
+    """
+    pages, start, batch = [], 0, 50
+    while True:
+        url = f"{BASE_URL}/rest/api/content"
+        params = {
+            "spaceKey": space_key,
+            "type":     "page",
+            "status":   "current",
+            "expand":   "body.export_view,ancestors",
+            "start":    start,
+            "limit":    batch,
+        }
+        r    = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH)
+        data = r.json()
+        pages.extend(data["results"])
+
+        # Stop if we've hit the user's page limit
+        if limit > 0 and len(pages) >= limit:
+            pages = pages[:limit]
+            break
+
+        # Stop if Confluence has no more pages
+        if start + batch >= data["size"]:
+            break
+
+        start += batch
+    return pages
