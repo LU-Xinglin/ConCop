@@ -4620,3 +4620,37 @@ if __name__ == "__main__":
     pages = get_all_pages(SPACE_KEY)
     print(f"Found {len(pages)} pages. Building document …\n")
     build_knowledge_base(pages)
+
+
+#fixes
+space_key = request.form.get("space_key", "").strip()
+    token     = request.form.get("token", "").strip()
+    cert_path = request.form.get("cert_path", "").strip()
+
+    try:
+        page_limit = int(request.form.get("page_limit", "0").strip())
+        if page_limit < 0:
+            page_limit = 0
+        if page_limit > 2000:
+            page_limit = 2000
+    except ValueError:
+        page_limit = 0  # 0 = fetch all
+
+    if not space_key:
+        return jsonify({"error": "Space key is required."}), 400
+    if not token:
+        return jsonify({"error": "Bearer token is required."}), 400
+
+
+
+thread = threading.Thread(
+        target=run_export,
+        args=(job_id, space_key, token, cert_path, page_limit),
+        daemon=True,
+    )
+
+
+def run_export(job_id: str, space_key: str, token: str, cert_path: str, page_limit: int):
+
+
+pages = exporter.get_all_pages(space_key, limit=page_limit)
