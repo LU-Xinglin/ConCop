@@ -4704,3 +4704,44 @@ def get_all_pages(space_key: str, limit: int = 0) -> list[dict]:
       </div>
 
       <button type="submit" id="submit-btn">Generate Knowledge Base</button>
+
+
+
+# Confluence writer
+import requests
+import urllib3
+
+urllib3.disable_warnings()
+
+BASE_URL  = "https://alm-confluence.systems.uk.hsbc/confluence"
+HEADERS   = {
+    "Authorization": "Bearer YOUR_TOKEN_HERE",
+    "Content-Type": "application/json"
+}
+CERT_PATH = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"
+SPACE_KEY = "AGRCKB"
+
+def create_page(title: str, body: str):
+    url = f"{BASE_URL}/rest/api/content"
+    payload = {
+        "type": "page",
+        "title": title,
+        "space": {
+            "key": SPACE_KEY
+        },
+        "body": {
+            "storage": {
+                "value": body,
+                "representation": "storage"
+            }
+        }
+    }
+    r = requests.post(url, headers=HEADERS, json=payload, verify=CERT_PATH)
+    return r.json()
+
+result = create_page(
+    title="Test Page — Confluence Copilot POC",
+    body="<p>This is a test page created via the Confluence API.</p>"
+)
+
+print(result)
