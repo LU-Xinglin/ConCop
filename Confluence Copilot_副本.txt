@@ -4689,3 +4689,18 @@ def get_all_pages(space_key: str, limit: int = 0) -> list[dict]:
 
         start += batch
     return pages
+
+
+#index.html remediation
+<hr class="divider" />
+
+      <!-- Page limit -->
+      <p class="section-label">Options</p>
+
+      <div class="field">
+        <label for="page_limit">Page Limit</label>
+        <input type="text" id="page_limit" name="page_limit" value="0" />
+        <p class="hint">Max pages to export (0 = all pages). Set a number to cap the export for large spaces.</p>
+      </div>
+
+      <button type="submit" id="submit-btn">Generate Knowledge Base</button>
