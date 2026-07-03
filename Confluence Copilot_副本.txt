@@ -4745,3 +4745,23 @@ result = create_page(
 )
 
 print(result)
+
+
+
+# remediation for payload
+payload = {
+    "type": "page",
+    "title": "Test Page — Confluence Copilot POC",
+    "space": {
+        "key": SPACE_KEY
+    },
+    "ancestors": [
+        {"id": "2799902201"}
+    ],
+    "body": {
+        "storage": {
+            "value": "<p>This is a test page created via the Confluence API.</p>",
+            "representation": "storage"
+        }
+    }
+}
