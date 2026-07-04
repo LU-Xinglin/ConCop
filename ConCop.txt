@@ -1,5 +1,5 @@
 #0704 Amendments
-<div class="field">
+    <div class="field">
         <label for="space_url">Confluence Page URL</label>
         <input type="text" id="space_url" name="space_url"
                placeholder="e.g. https://alm-confluence.systems.uk.hsbc/confluence/spaces/AGRCKB/pages/..." autocomplete="off" required />
