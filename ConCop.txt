@@ -1,0 +1,19 @@
+#0704 Amendments
+<div class="field">
+        <label for="space_url">Confluence Page URL</label>
+        <input type="text" id="space_url" name="space_url"
+               placeholder="e.g. https://alm-confluence.systems.uk.hsbc/confluence/spaces/AGRCKB/pages/..." autocomplete="off" required />
+        <p class="hint">Paste any link from the space you want to export.</p>
+      </div>
+
+
+space_url = request.form.get("space_url", "").strip()
+    space_key = ""
+    if "/spaces/" in space_url:
+        space_key = space_url.split("/spaces/")[1].split("/")[0].strip()
+
+
+if not space_url:
+        return jsonify({"error": "Please paste a Confluence page URL."}), 400
+    if not space_key:
+        return jsonify({"error": "Could not identify the space from that URL. Make sure it contains /spaces/SPACEKEY/."}), 400
