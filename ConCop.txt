@@ -512,3 +512,6 @@ if not space_url:
 
 </body>
 </html>
+
+#command
+python -c "import base64; data=open('static/hsbc_logo.png','rb').read(); print(base64.b64encode(data).decode())"
