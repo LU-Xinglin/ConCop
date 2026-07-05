@@ -519,14 +519,14 @@ python -c "import base64; data=open('static/hsbc_logo.png','rb').read(); print(b
 
 
 # Bug Fix
-except Exception as e:
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-            except Exception:
-                pass
-        with jobs_lock:
-            jobs[job_id] = {
-                "status":  "error",
-                "message": str(e),
-            }
+    except Exception as e:
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            with jobs_lock:
+                jobs[job_id] = {
+                    "status":  "error",
+                    "message": str(e),
+                }
