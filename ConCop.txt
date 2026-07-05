@@ -599,3 +599,21 @@ import zipfile
                 print("  [ZIP OK] File structure is valid")
     except Exception as e:
         print(f"  [ZIP ERROR]: {e}")
+
+
+# troubleshoot
+python -c "
+import zipfile
+with zipfile.ZipFile('generated/CSCORE_20260705_145126.docx', 'r') as z:
+    for name in z.namelist():
+        print(name)
+"
+
+
+python -c "
+import zipfile
+with zipfile.ZipFile('generated/CSCORE_20260705_145126.docx', 'r') as z:
+    content = z.read('word/document.xml').decode('utf-8', errors='replace')
+    # Print last 2000 chars where corruption usually is
+    print(content[-2000:])
+"
