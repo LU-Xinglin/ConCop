@@ -585,3 +585,17 @@ if html_content.strip():
                 doc.add_paragraph(f"[Error processing this page: {e}]")
         else:
             doc.add_paragraph("[No content]")
+
+# bug fix 5
+import zipfile
+    doc.save(output_file)
+    # Verify the file is a valid zip (all .docx files are zip archives)
+    try:
+        with zipfile.ZipFile(output_file, 'r') as z:
+            result = z.testzip()
+            if result:
+                print(f"  [CORRUPT ZIP entry]: {result}")
+            else:
+                print("  [ZIP OK] File structure is valid")
+    except Exception as e:
+        print(f"  [ZIP ERROR]: {e}")
