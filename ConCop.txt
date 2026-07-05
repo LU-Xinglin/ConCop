@@ -530,3 +530,36 @@ python -c "import base64; data=open('static/hsbc_logo.png','rb').read(); print(b
                     "status":  "error",
                     "message": str(e),
                 }
+
+
+# Bug fix 2
+# Anything else (mailto:, javascript:, anchors, etc.) — return as-is
+    return href
+
+
+def _sanitise_url(url: str) -> str:
+    """Remove characters that break Word's XML relationship store."""
+    from urllib.parse import urlparse, urlunparse, quote
+    try:
+        parsed = urlparse(url)
+        # Re-encode the path component only, leaving scheme/host intact
+        clean_path = quote(parsed.path, safe="/-._~:@!$&'()*+,;=")
+        cleaned = urlunparse((
+            parsed.scheme, parsed.netloc, clean_path,
+            parsed.params, parsed.query, parsed.fragment
+        ))
+        return cleaned
+    except Exception:
+        return ""
+
+
+url = _sanitise_url(url)
+    if not url:
+        paragraph.add_run(display_text)
+        return
+
+    _register_link(display_text, url)
+
+    part = paragraph.part
+    try:
+        r_id = part.relate_to(
