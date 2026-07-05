@@ -623,3 +623,484 @@ python -c "import zipfile; z=zipfile.ZipFile('generated/CSCORE_20260705_145126.d
 
 
 python -c "import zipfile; z=zipfile.ZipFile('generated/YOUR_FILENAME.docx','r'); content=z.read('word/_rels/document.xml.rels').decode('utf-8',errors='replace'); print(content); z.close()"
+
+
+
+
+# new dialog concop export
+"""
+ConCop_export.py
+----------------
+Pulls every page from a Confluence space and concatenates them into a single
+Word document that mirrors Confluence's native Word-export quality.
+
+Requirements:
+    pip install requests urllib3 python-docx beautifulsoup4 lxml
+"""
+
+import re
+import requests
+import urllib3
+from urllib.parse import urlparse, urlunparse, quote
+from bs4 import BeautifulSoup, NavigableString, Tag
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+
+urllib3.disable_warnings()
+
+# ── XML sanitisation ────────────────────────────────────────────────────────────
+# Characters below are simply illegal in XML 1.0 (not just "unsafe" — the spec
+# forbids them outright). Word's OOXML parser rejects the whole file if even one
+# slips into a run; lenient tools that just regex/unzip the XML won't notice.
+# Allowed control chars are only \t \n \r (0x09, 0x0A, 0x0D).
+_ILLEGAL_XML_CHARS_RE = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffe\uffff]"
+)
+
+
+def _sanitize_text(text) -> str:
+    """Strip characters that are illegal in XML 1.0 so Word can't choke on them."""
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    return _ILLEGAL_XML_CHARS_RE.sub("", text)
+
+# ── CONFIG ─────────────────────────────────────────────────────────────────────
+BASE_URL  = "https://alm-confluence.systems.uk.hsbc/confluence"
+HEADERS   = {"Authorization": "Bearer YOUR_TOKEN_HERE"}
+CERT_PATH = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"
+SPACE_KEY = "AGRCKB"
+OUTPUT    = "knowledge_base.docx"
+# ───────────────────────────────────────────────────────────────────────────────
+
+
+# ── Confluence API ─────────────────────────────────────────────────────────────
+
+def get_space_title(space_key: str) -> str:
+    """Fetch the display name of a Confluence space."""
+    url = f"{BASE_URL}/rest/api/space/{space_key}"
+    r   = requests.get(url, headers=HEADERS, verify=CERT_PATH)
+    return r.json().get("name", space_key)
+
+
+def get_all_pages(space_key: str) -> list[dict]:
+    """
+    Fetch ALL pages from the space with export_view body.
+    Uses correct pagination: stops when a batch returns fewer results than requested.
+    """
+    pages, start, batch = [], 0, 50
+    while True:
+        url = f"{BASE_URL}/rest/api/content"
+        params = {
+            "spaceKey": space_key,
+            "type":     "page",
+            "status":   "current",
+            "expand":   "body.export_view,ancestors",
+            "start":    start,
+            "limit":    batch,
+        }
+        r       = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH)
+        data    = r.json()
+        results = data["results"]
+        pages.extend(results)
+        print(f"  Fetched so far: {len(pages)} (this batch: {len(results)}, start={start})")
+        # If we got fewer results than requested, we've reached the end
+        if len(results) < batch:
+            break
+        start += batch
+    return pages
+
+
+# ── Hyperlink style helper ─────────────────────────────────────────────────────
+
+def _ensure_hyperlink_style(doc: Document):
+    """Ensure the 'Hyperlink' character style exists in the document."""
+    styles = doc.styles
+    try:
+        styles["Hyperlink"]
+        return
+    except KeyError:
+        pass
+
+    style_elem = OxmlElement("w:style")
+    style_elem.set(qn("w:type"), "character")
+    style_elem.set(qn("w:styleId"), "Hyperlink")
+
+    name_elem = OxmlElement("w:name")
+    name_elem.set(qn("w:val"), "Hyperlink")
+    style_elem.append(name_elem)
+
+    rPr   = OxmlElement("w:rPr")
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "0563C1")
+    rPr.append(color)
+    u = OxmlElement("w:u")
+    u.set(qn("w:val"), "single")
+    rPr.append(u)
+
+    style_elem.append(rPr)
+    doc.styles.element.append(style_elem)
+
+
+# ── URL helpers ────────────────────────────────────────────────────────────────
+
+def _resolve_href(href: str, classes: list) -> str:
+    """Normalise a Confluence href to an absolute URL."""
+    if not href:
+        return ""
+    if href.startswith("http"):
+        return href
+    if href.startswith("/confluence"):
+        domain = BASE_URL.split("/confluence")[0]
+        return domain + href
+    if href.startswith("/"):
+        return BASE_URL.rstrip("/") + href
+    return href
+
+
+def _sanitise_url(url: str) -> str:
+    """
+    Encode special characters in URLs so Word's XML relationship store
+    doesn't choke on spaces, brackets, unicode, or other invalid chars.
+    """
+    try:
+        parsed    = urlparse(url)
+        clean_path = quote(parsed.path, safe="/-._~:@!$&'()*+,;=")
+        return urlunparse((
+            parsed.scheme, parsed.netloc, clean_path,
+            parsed.params, parsed.query, parsed.fragment
+        ))
+    except Exception:
+        return ""
+
+
+# ── Link collector for appendix ────────────────────────────────────────────────
+_LINK_REGISTRY: list[tuple[str, str, str]] = []
+_CURRENT_PAGE_TITLE: str = ""
+
+
+def _register_link(display_text: str, url: str):
+    if url:
+        _LINK_REGISTRY.append((_CURRENT_PAGE_TITLE, display_text.strip(), url))
+
+
+# ── Hyperlink XML builder ──────────────────────────────────────────────────────
+
+def _add_hyperlink(paragraph, url: str, display_text: str):
+    """
+    Insert a properly styled, clickable hyperlink into a paragraph.
+    Sanitises the URL before embedding to prevent Word XML corruption.
+    """
+    if not url or not display_text:
+        return
+
+    display_text = _sanitize_text(display_text)
+    if not display_text:
+        return
+
+    url = _sanitise_url(url)
+    if not url:
+        paragraph.add_run(display_text)
+        return
+
+    _register_link(display_text, url)
+
+    part = paragraph.part
+    try:
+        r_id = part.relate_to(
+            url,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+            is_external=True,
+        )
+    except Exception as e:
+        print(f"  [hyperlink skipped — bad URL] {url!r}: {e}")
+        paragraph.add_run(display_text)
+        return
+
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), r_id)
+
+    run_elem = OxmlElement("w:r")
+    rPr      = OxmlElement("w:rPr")
+    rStyle   = OxmlElement("w:rStyle")
+    rStyle.set(qn("w:val"), "Hyperlink")
+    rPr.append(rStyle)
+    run_elem.append(rPr)
+
+    t      = OxmlElement("w:t")
+    t.text = display_text
+    if display_text != display_text.strip():
+        t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    run_elem.append(t)
+
+    hyperlink.append(run_elem)
+    paragraph._p.append(hyperlink)
+
+
+# ── Inline text/run builder ────────────────────────────────────────────────────
+
+def _add_text_runs(paragraph, node):
+    """Recursively walk a BS4 node, emitting Word runs with inline formatting."""
+    if isinstance(node, NavigableString):
+        text = _sanitize_text(str(node))
+        if not text:
+            return
+        run = paragraph.add_run(text)
+        for parent in node.parents:
+            if not isinstance(parent, Tag):
+                break
+            n = parent.name
+            if n in ("strong", "b"):   run.bold      = True
+            if n in ("em", "i"):       run.italic    = True
+            if n == "u":               run.underline = True
+            if n in ("code", "tt"):
+                run.font.name = "Courier New"
+                run.font.size = Pt(10)
+            if n in ("p", "li", "td", "th", "div", "body"):
+                break
+
+    elif isinstance(node, Tag):
+        if node.name == "a":
+            href    = node.get("href", "").strip()
+            display = node.get_text(strip=False)
+            classes = node.get("class", [])
+            if href and display.strip():
+                resolved = _resolve_href(href, classes)
+                if resolved:
+                    _add_hyperlink(paragraph, resolved, display)
+                else:
+                    paragraph.add_run(_sanitize_text(display))
+            else:
+                for child in node.children:
+                    _add_text_runs(paragraph, child)
+        else:
+            for child in node.children:
+                _add_text_runs(paragraph, child)
+
+
+# ── Table builder ──────────────────────────────────────────────────────────────
+
+def _process_table(doc: Document, table_tag: Tag):
+    """Convert an HTML <table> to a python-docx Table."""
+    rows_html = table_tag.find_all("tr")
+    if not rows_html:
+        return
+
+    first_row_cells = rows_html[0].find_all(["td", "th"])
+    n_cols = sum(int(c.get("colspan", 1)) for c in first_row_cells)
+    if n_cols == 0:
+        return
+
+    table = doc.add_table(rows=0, cols=n_cols)
+    table.style = "Table Grid"
+
+    for tr in rows_html:
+        cells_html = tr.find_all(["td", "th"])
+        row        = table.add_row()
+        col_idx    = 0
+        for cell_html in cells_html:
+            if col_idx >= n_cols:
+                break
+            cell      = row.cells[col_idx]
+            is_header = cell_html.name == "th"
+            p         = cell.paragraphs[0]
+            _add_text_runs(p, cell_html)
+            if is_header:
+                for run in p.runs:
+                    run.bold = True
+            col_idx += int(cell_html.get("colspan", 1))
+
+
+# ── List builder ───────────────────────────────────────────────────────────────
+
+def _process_list(doc: Document, list_tag: Tag, level: int = 0):
+    """Recursively process <ul>/<ol>, supporting nesting."""
+    ordered = list_tag.name == "ol"
+    for li in list_tag.find_all("li", recursive=False):
+        style = "List Number" if ordered else "List Bullet"
+        p     = doc.add_paragraph(style=style)
+        p.paragraph_format.left_indent = Inches(0.25 * (level + 1))
+
+        for child in li.children:
+            if isinstance(child, NavigableString):
+                cleaned = _sanitize_text(str(child))
+                if cleaned.strip():
+                    p.add_run(cleaned)
+            elif isinstance(child, Tag) and child.name not in ("ul", "ol"):
+                _add_text_runs(p, child)
+
+        for nested in li.find_all(["ul", "ol"], recursive=False):
+            _process_list(doc, nested, level + 1)
+
+
+# ── Single element dispatcher ──────────────────────────────────────────────────
+
+def _process_element(doc: Document, element: Tag) -> bool:
+    tag = element.name
+
+    if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+        p = doc.add_paragraph(style=f"Heading {min(int(tag[1]), 4)}")
+        _add_text_runs(p, element)
+        return True
+
+    if tag == "p":
+        if element.get_text(strip=True):
+            p = doc.add_paragraph()
+            _add_text_runs(p, element)
+        return True
+
+    if tag == "pre":
+        p   = doc.add_paragraph(style="No Spacing")
+        run = p.add_run(_sanitize_text(element.get_text()))
+        run.font.name = "Courier New"
+        run.font.size = Pt(9)
+        return True
+
+    if tag in ("ul", "ol"):
+        _process_list(doc, element, level=0)
+        return True
+
+    if tag == "table":
+        _process_table(doc, element)
+        doc.add_paragraph()
+        return True
+
+    if tag == "hr":
+        p   = doc.add_paragraph()
+        pPr = p._p.get_or_add_pPr()
+        pBdr   = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"),   "single")
+        bottom.set(qn("w:sz"),    "6")
+        bottom.set(qn("w:space"), "1")
+        bottom.set(qn("w:color"), "AAAAAA")
+        pBdr.append(bottom)
+        pPr.append(pBdr)
+        return True
+
+    return False
+
+
+# ── Main HTML → DOCX converter ─────────────────────────────────────────────────
+
+def html_to_docx(doc: Document, html: str):
+    """
+    Parse export_view HTML and append content to doc.
+    Iterative queue — never recurses, handles any nesting depth.
+    """
+    soup  = BeautifulSoup(html, "lxml")
+    body  = soup.find("body") or soup
+    queue = list(body.children)
+
+    while queue:
+        node = queue.pop(0)
+
+        if isinstance(node, NavigableString):
+            text = _sanitize_text(str(node)).strip()
+            if text:
+                doc.add_paragraph(text)
+            continue
+
+        if not isinstance(node, Tag):
+            continue
+
+        handled = _process_element(doc, node)
+        if not handled:
+            queue = list(node.children) + queue
+
+
+# ── Document builder ───────────────────────────────────────────────────────────
+
+def build_knowledge_base(pages: list[dict], output_file: str = OUTPUT):
+    global _LINK_REGISTRY
+    _LINK_REGISTRY = []
+
+    doc = Document()
+    _ensure_hyperlink_style(doc)
+
+    print(f"  Fetching space title for '{SPACE_KEY}' …")
+    space_title = get_space_title(SPACE_KEY)
+
+    # Cover page
+    title = doc.add_heading(_sanitize_text(space_title), level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph(f"Space: {_sanitize_text(SPACE_KEY)} — auto-generated via Confluence export_view API")
+    doc.add_page_break()
+
+    # Table of contents
+    doc.add_heading("Contents", level=1)
+    for i, page in enumerate(pages, 1):
+        doc.add_paragraph(f"{i}. {_sanitize_text(page['title'])}", style="List Number")
+    doc.add_page_break()
+
+    # Page content
+    for page in pages:
+        print(f"  Processing: {page['title']}")
+
+        clean_title = _sanitize_text(page["title"])
+
+        global _CURRENT_PAGE_TITLE
+        _CURRENT_PAGE_TITLE = clean_title
+
+        doc.add_heading(clean_title, level=1)
+
+        ancestors = page.get("ancestors", [])
+        if ancestors:
+            path = " › ".join(_sanitize_text(a["title"]) for a in ancestors)
+            p    = doc.add_paragraph(f"Path: {path}")
+            p.runs[0].font.color.rgb = RGBColor(0x70, 0x70, 0x70)
+            p.runs[0].font.size      = Pt(9)
+
+        html_content = (
+            page.get("body", {})
+                .get("export_view", {})
+                .get("value", "")
+        )
+
+        if html_content.strip():
+            try:
+                html_to_docx(doc, html_content)
+            except Exception as e:
+                print(f"  [ERROR on page '{page['title']}']: {e}")
+                doc.add_paragraph(f"[Error processing this page: {e}]")
+        else:
+            doc.add_paragraph("[No content]")
+
+        doc.add_page_break()
+
+    # Appendix
+    if _LINK_REGISTRY:
+        doc.add_heading("Appendix: Links Referenced", level=1)
+        doc.add_paragraph(
+            "The list below contains every hyperlink found in the pages above, "
+            "grouped by the page it appeared on, in plain-text form."
+        )
+        current_page = None
+        counter      = 0
+        for page_title, display_text, url in _LINK_REGISTRY:
+            if page_title != current_page:
+                current_page = page_title
+                counter      = 0
+                doc.add_heading(page_title, level=2)
+            counter += 1
+            p = doc.add_paragraph()
+            p.add_run(f"{counter}. {display_text}: ").bold = True
+            p.add_run(url)
+
+    doc.save(output_file)
+    print(f"\n✅  Saved {len(pages)} pages → {output_file}")
+    print(f"   Appendix contains {len(_LINK_REGISTRY)} links across "
+          f"{len(set(p for p,_,_ in _LINK_REGISTRY))} pages.")
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print(f"Fetching all pages from space '{SPACE_KEY}' …")
+    pages = get_all_pages(SPACE_KEY)
+    print(f"Found {len(pages)} pages. Building document …\n")
+    build_knowledge_base(pages)
