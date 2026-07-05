@@ -574,3 +574,14 @@ results = data["results"]
             # Got fewer results than requested — we've reached the end
             break
         start += batch
+
+
+# bug fix 4
+if html_content.strip():
+            try:
+                html_to_docx(doc, html_content)
+            except Exception as e:
+                print(f"  [ERROR on page '{page['title']}']: {e}")
+                doc.add_paragraph(f"[Error processing this page: {e}]")
+        else:
+            doc.add_paragraph("[No content]")
