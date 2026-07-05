@@ -617,3 +617,7 @@ with zipfile.ZipFile('generated/CSCORE_20260705_145126.docx', 'r') as z:
     # Print last 2000 chars where corruption usually is
     print(content[-2000:])
 "
+
+
+python -c "import zipfile; z=zipfile.ZipFile('generated/YOUR_FILENAME.docx','r'); [print(name) for name in z.namelist()]; z.close()"
+python -c "import zipfile; z=zipfile.ZipFile('generated/YOUR_FILENAME.docx','r'); content=z.read('word/document.xml').decode('utf-8',errors='replace'); print(content[-2000:]); z.close()"
