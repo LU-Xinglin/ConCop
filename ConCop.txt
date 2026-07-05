@@ -562,4 +562,15 @@ url = _sanitise_url(url)
 
     part = paragraph.part
     try:
-        r_id = part.relate_to(
+        r_id = part.relate_to
+
+
+
+# bug fix 3
+results = data["results"]
+        pages.extend(results)
+        print(f"  Fetched so far: {len(pages)} (this batch: {len(results)}, start={start})")
+        if len(results) < batch:
+            # Got fewer results than requested — we've reached the end
+            break
+        start += batch
