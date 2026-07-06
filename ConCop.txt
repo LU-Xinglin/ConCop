@@ -1159,3 +1159,5 @@ url = "https://graph.microsoft.com/v1.0/me/messages?$top=5"
 
 r = requests.get(url, headers=headers)
 print(r.json())
+
+netsh advfirewall firewall add rule name="Flask Portal" dir=in action=allow protocol=TCP localport=5000
