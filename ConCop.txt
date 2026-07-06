@@ -1112,3 +1112,84 @@ ConCop – Automated Confluence Knowledge Consolidation & Update Assistant – I
 
 
 Confluence Knowledge Export – KB Extraction for AI Q&A – Internal LLM – Payments Controls
+
+
+
+
+
+# Use Case Creation
+I am currently working in the Business Management and Control team within the broader Payments function. Specifically, I am anchored on the control side, primarily focusing on payment-related control operations. As you know, the summer internship is only 10 weeks long, so it is unrealistic for me to deliver groundbreaking projects. However, I am fully committed—I don't mind working overtime or weekends. Overall, I have one single goal for this summer: hit my KPIs and secure the return offer. In terms of tasks, my supervisor has outlined one overarching requirement:
+1. The Problem: Currently, there is too much fragmented control-related knowledge within the team, and my MD wants to centralize this knowledge. The team is currently using Confluence, and a team member has already been tasked with the fundamental knowledge-gathering process. In principle, this colleague (let's call them "CC") will consolidate and upload all the necessary content to Confluence by June 30th. How we organize and structure it will be decided later.
+2. My Role: As you know, AI is the current strategic focus. The MD wants me to come up with an innovative way to empower and enhance CC's solution. I have developed two proposals and have already briefed my supervisor:Option 1: "Confluence Copilot"
+ Use Case: Assisting colleagues in updating Confluence pages. For example, when regulators issue new guidelines, we need to update the relevant Confluence page and notify colleagues through specific channels (such as automated emails).Logic:
+ 1. If external LLM APIs are restricted (due to strict banking regulations): I will design prompt templates for my colleagues. Part of the template will require them to describe the page in natural language or upload the latest regulatory documents. This prompt will then be fed into the bank’s internal LLM. The model will output a script, which colleagues can copy and paste into a portal I develop. This portal will read the script and automatically generate/update the corresponding Confluence page. Of course, I will need to predefine the parent page (since the function is highly standardized—specifically to update the knowledge base built by CC—I can lock it down directly). Alternatively, I could grant them some autonomy on this later on.
+ 2. If external LLM APIs are accessible: Certain steps, particularly those involving the internal model, can be automated. We can discuss this later as acquiring these resources might be challenging.Option 2: Governance Guide
+ Use Case: Serving as a Q&A tool where colleagues can directly inquire about specific operational procedures.Logic: I will extract all content from CC’s Confluence pages using specific methods (e.g., Confluence APIs) and consolidate it into a single file (optimizing for minimal size without sacrificing accuracy, while ensuring it is highly readable for AI). At this stage, if external APIs are restricted, the file will be uploaded to the internal LLM for querying. If external APIs are accessible, the queries can be handled directly within the portal.Show moreThe link to share with them is:
+http://10.227.142.159:5000
+But remember — this only works if:
+
+Your laptop is on and not sleeping
+The Command Prompt with python app.py is still running
+They're on the same internal network as you (same office or VPN)
+i see two links in CMD, one for local one for others?Yes exactly.
+
+http://127.0.0.1:5000 — your machine only, nobody else can use this
+http://10.227.142.159:5000 — everyone on the internal network, this is the one to share
+got it. 
+let's say we have access to external APIs.
+can i build a writer, user inputs human language and any file they want, describe the page they want, the portal will generate a sample page on the right hand side of the web (basically a demo), and then if the user says yes, he or she accepts the page, the app starts writing.
+can this be done?Yes, absolutely. This is actually a very clean and impressive demo. Let me break down what it would look like and what's needed:
+The flow:
+
+User fills in a form — page title, parent page, free text description, optional file upload
+They click "Preview"
+Your portal sends the description + file content to the external LLM API
+The LLM returns structured content
+A live preview renders on the right side of the screen — looks like a real Confluence page
+User reviews it, edits if needed, clicks "Publish"
+Your portal calls the Confluence API and creates the page
+
+Is it technically doable? Yes, every single piece:
+
+File upload and text extraction — doable in Python (PDF, Word, txt)
+LLM API call — straightforward with Anthropic or OpenAI
+Live preview panel — HTML/CSS split layout, render the LLM output as formatted HTML
+Confluence page creation — you've already proven this works with create_page.py
+
+What you'd need:
+
+External API access + a key (Anthropic or OpenAI)
+The API key would live on your server, never exposed to users
+A prompt template that tells the LLM to output structured Confluence-ready content
+
+The one design decision: what format does the LLM output? Two options:
+
+HTML/Confluence storage format — directly publishable, preview renders it as-is
+Structured JSON — your code builds the page from fields, more control
+
+Option 1 is simpler and faster to build.
+Do you have API access confirmed, or are you planning ahead?im asking for it
+in the application form, theres this:
+can you describe the two use cases for meI can see this is an internal AI use case application form at HSBC. Based on what I can read, it's asking you to describe the business problem, success criteria, users/roles involved, and data inputs.
+Here are the two use cases written in the format the form is asking for:
+
+Use Case 1 — Knowledge Base Extraction (Option 2)
+Business Problem: Knowledge sharing within the GPS control team is inefficient and time-consuming. Control-related knowledge is fragmented across multiple Confluence pages, making it difficult for colleagues to quickly locate operational procedures and regulatory guidance.
+End Solution: A portal that automatically extracts all content from the team's Confluence space via API and consolidates it into a single structured document, optimised for AI querying. Colleagues upload this document to the internal LLM to ask questions about specific procedures in plain English.
+Users: GPS Control team members, Business Management and Control colleagues.
+Data Inputs: Confluence page content via internal REST API (text, tables, hyperlinks).
+Success Criteria: Reduction in time spent searching for operational procedures. Colleagues can answer procedural questions in seconds rather than navigating multiple Confluence pages.
+
+Use Case 2 — AI-Assisted Confluence Page Writer (Option 1)
+Business Problem: When regulators issue new guidelines, colleagues must manually write and publish updated Confluence pages — a process that is slow, inconsistent in structure, and dependent on individual writing ability.
+End Solution: A portal where colleagues describe a new page in natural language and optionally upload a regulatory document. The LLM generates a structured, consistently formatted Confluence page. The user previews and approves it before the portal publishes it automatically via the Confluence API.
+Users: GPS Control team members responsible for maintaining the knowledge base.
+Data Inputs: Free text descriptions, uploaded regulatory documents (PDF/Word), existing Confluence page structure for formatting reference.
+Success Criteria: Reduction in time to publish new knowledge base pages. Improved consistency of page structure across the knowledge base.
+
+Want me to adjust the tone or add/remove anything before you submit?please use the writer one, more complicated, more value adding, and easier to be approved.
+please write within 1000 charactersBusiness Problem: Knowledge sharing within the GPS Control team is inefficient. When regulators issue new guidelines, colleagues must manually write, format, and publish Confluence pages — a slow process prone to inconsistency.
+End Solution: A web portal where colleagues describe a new page in natural language and optionally upload a regulatory document. An LLM comprehends the input, generates a structured, consistently formatted Confluence page, and presents a live preview for review. Upon approval, the portal publishes it automatically via the Confluence API — no manual formatting or copy-pasting required.
+Users: GPS Control team members maintaining the knowledge base.
+Data Inputs: Free text descriptions, uploaded regulatory documents (PDF/Word).
+Success Criteria: Reduced time to publish new knowledge base pages. Improved structural consistency across the knowledge base. Colleagues without strong writing skills can contribute accurate, well-formatted content.
