@@ -1130,3 +1130,15 @@ End Solution: In alignment with the upliftment of GPS and Payments controls, thi
 Users: GPS Control team members maintaining the knowledge base.
 Data Inputs: Free text descriptions, uploaded supporting documents (PDF/Word).
 Success Criteria: Reduced time to publish knowledge base updates. Improved consistency across the knowledge base. Strengthened control environment through faster, higher-quality documentation.
+
+
+
+
+If yes to both, the Microsoft Graph API is the route. The test would be:
+
+Go to https://developer.microsoft.com/en-us/graph/graph-explorer in your browser
+Click Sign in with your HSBC Microsoft account
+Try this sample query: GET https://graph.microsoft.com/v1.0/me/messages?$top=5
+
+This fetches your 5 most recent emails. If it returns data, the API is accessible and we can build on it.
+Try that and tell me what happens — either you see email data, a permissions error, or a login block. That tells us exactly what's possible.
