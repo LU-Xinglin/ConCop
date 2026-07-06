@@ -1142,3 +1142,20 @@ Try this sample query: GET https://graph.microsoft.com/v1.0/me/messages?$top=5
 
 This fetches your 5 most recent emails. If it returns data, the API is accessible and we can build on it.
 Try that and tell me what happens — either you see email data, a permissions error, or a login block. That tells us exactly what's possible.
+
+
+
+
+import requests
+
+TOKEN = "PASTE_YOUR_TOKEN_HERE"
+
+headers = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json"
+}
+
+url = "https://graph.microsoft.com/v1.0/me/messages?$top=5"
+
+r = requests.get(url, headers=headers)
+print(r.json())
