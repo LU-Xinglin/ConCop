@@ -1109,3 +1109,6 @@ if __name__ == "__main__":
 do you think that scraping information of a internal sharepoint is possible
 
 ConCop – Automated Confluence Knowledge Consolidation & Update Assistant – Internal LLM (GenAI) – Payments, Business Management & Controls
+
+
+Confluence Knowledge Export – KB Extraction for AI Q&A – Internal LLM – Payments Controls
