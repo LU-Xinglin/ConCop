@@ -1123,3 +1123,10 @@ End Solution: In alignment with the upliftment of GPS and Payments controls, thi
 Users: GPS Control team members maintaining the knowledge base.
 Data Inputs: Free text descriptions, uploaded supporting documents (PDF/Word).
 Success Criteria: Reduced time to publish knowledge base updates. Improved structural consistency across the knowledge base. Strengthened control environment through faster, higher-quality documentation of procedural and regulatory changes.
+
+
+Business Problem: Maintaining an up-to-date control knowledge base is critical yet time-consuming. Colleagues must manually write, format, and publish Confluence pages whenever procedures or controls are updated — a slow process prone to inconsistency that undermines our control environment.
+End Solution: In alignment with the upliftment of GPS and Payments controls, this portal enables colleagues to describe any Confluence update in natural language and optionally upload supporting documents. An LLM generates a structured, consistently formatted page and presents a live preview for approval. The portal then publishes automatically via the Confluence API — eliminating manual formatting and ensuring consistent standards across the knowledge base.
+Users: GPS Control team members maintaining the knowledge base.
+Data Inputs: Free text descriptions, uploaded supporting documents (PDF/Word).
+Success Criteria: Reduced time to publish knowledge base updates. Improved consistency across the knowledge base. Strengthened control environment through faster, higher-quality documentation.
