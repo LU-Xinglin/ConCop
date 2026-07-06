@@ -1104,3 +1104,8 @@ if __name__ == "__main__":
     pages = get_all_pages(SPACE_KEY)
     print(f"Found {len(pages)} pages. Building document …\n")
     build_knowledge_base(pages)
+
+
+do you think that scraping information of a internal sharepoint is possible
+
+ConCop – Automated Confluence Knowledge Consolidation & Update Assistant – Internal LLM (GenAI) – Payments, Business Management & Controls
