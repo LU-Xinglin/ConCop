@@ -1250,3 +1250,40 @@ NOTES
 
 Best regards,
 [Your Name]
+
+
+Good call — let me help you clean up the folder first, then draft the email.
+
+**Step 1 — Clean up your folder**
+
+Your `confluence_portal` folder should contain exactly these files before you send it:
+
+```
+confluence_portal\
+    app.py
+    ConCop_export.py
+    requirements.txt
+    templates\
+        index.html
+    static\
+        hsbc_logo.png
+    generated\        ← delete everything inside, keep the empty folder
+```
+
+Things to do before sending:
+1. Delete all `.docx` files from the `generated\` folder — those are your test exports, no need to share
+2. Make sure `app.py` has your cert path hardcoded correctly
+3. Make sure there are no leftover test scripts like `create_page.py` inside the portal folder
+
+**Step 2 — How to send the folder**
+
+Right-click `confluence_portal` → **Send to** → **Compressed (zipped) folder**. This creates `confluence_portal.zip`. Send that zip file via email or Teams.
+
+---
+
+Now here's the email:There's the email. A few things to personalise before sending:
+
+- Replace `[Name]` and `[Your Name]`
+- The cert path in Step 6 — your colleague needs to find their own `.pem` file. If they don't have one, that's actually the most common blocker — they may need to ask IT for it or find it in a shared network location
+
+Also one important note: if your colleague's machine also has `BlockInbound` firewall policy, the portal will only work locally for them too — but that's fine for testing purposes.
