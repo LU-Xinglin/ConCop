@@ -1287,3 +1287,12 @@ Now here's the email:There's the email. A few things to personalise before sendi
 - The cert path in Step 6 — your colleague needs to find their own `.pem` file. If they don't have one, that's actually the most common blocker — they may need to ask IT for it or find it in a shared network location
 
 Also one important note: if your colleague's machine also has `BlockInbound` firewall policy, the portal will only work locally for them too — but that's fine for testing purposes.
+
+
+
+flask>=3.0
+requests
+urllib3
+python-docx
+beautifulsoup4
+lxml
