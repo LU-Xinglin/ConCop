@@ -1161,3 +1161,92 @@ r = requests.get(url, headers=headers)
 print(r.json())
 
 netsh advfirewall firewall add rule name="Flask Portal" dir=in action=allow protocol=TCP localport=5000
+
+
+Im trying to send the whole folder to a teammate for a tryout, how do I draft an email to be as detailed as possible, starting from what should I do about the Folder, cuz right now it's kind of messy. include the steps of applying and configuring Python access
+
+
+Subject: Knowledge Base Portal — Setup Guide
+
+Hi [Name],
+
+Please find attached the Knowledge Base Portal — an internal tool that exports any Confluence space into a structured Word document optimised for AI querying.
+
+Below are the full setup instructions.
+
+───────────────────────────
+PRE-REQUISITES
+───────────────────────────
+
+1. Python 3.11 or above
+   Download from: https://www.python.org/downloads/
+   During installation, make sure to tick "Add Python to PATH".
+
+2. Verify Python is installed
+   Open Command Prompt (press Windows + R, type cmd, press Enter) and run:
+   python --version
+   You should see something like: Python 3.11.x
+
+───────────────────────────
+SETUP STEPS
+───────────────────────────
+
+Step 1 — Extract the zip file
+   Right-click the attached zip → Extract All → choose a location (e.g. your Documents folder).
+
+Step 2 — Open Command Prompt and navigate to the folder
+   cd C:\path\to\confluence_portal
+   (Replace with the actual path where you extracted the folder)
+
+Step 3 — Create a virtual environment
+   python -m venv venv
+
+Step 4 — Activate the virtual environment
+   venv\Scripts\activate
+   You should see (venv) appear at the start of the line.
+
+Step 5 — Install dependencies
+   pip install -r requirements.txt
+   Wait for all packages to finish installing.
+
+Step 6 — Configure the certificate path
+   Open app.py in any text editor (e.g. Notepad).
+   Find this line:
+   CERT_PATH = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"
+   Replace the path with the location of the HSBC certificate on your own machine.
+   If you are unsure where your certificate is, check with IT or look in:
+   C:\Users\YOUR_USERNAME\certs\
+
+Step 7 — Run the server
+   python app.py
+   You should see:
+   Running on http://127.0.0.1:5000
+   Running on http://YOUR_IP:5000
+
+Step 8 — Open the portal
+   Open any browser and go to: http://127.0.0.1:5000
+
+───────────────────────────
+USING THE PORTAL
+───────────────────────────
+
+1. Paste any Confluence page URL from the space you want to export
+   (e.g. https://alm-confluence.systems.uk.hsbc/confluence/spaces/AGRCKB/pages/...)
+
+2. Paste your personal Confluence access token
+   To generate one: log into Confluence → click your profile picture → Settings → Personal Access Tokens → Create token
+
+3. Click Generate Knowledge Base and wait for the export to complete
+
+4. Click Download Word Document when it appears
+
+───────────────────────────
+NOTES
+───────────────────────────
+
+- The server runs locally on your machine. Keep the Command Prompt window open while using the portal.
+- Generated documents are saved in the generated\ folder inside the portal directory.
+- If you encounter any issues, please reach out and I am happy to help.
+
+Best regards,
+[Your Name]
