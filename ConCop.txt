@@ -1296,3 +1296,6 @@ urllib3
 python-docx
 beautifulsoup4
 lxml
+
+
+exporter.CERT_PATH = os.path.join(os.path.dirname(__file__), "hsbc-orca-g2.pem")
