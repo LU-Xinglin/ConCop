@@ -1299,3 +1299,17 @@ lxml
 
 
 exporter.CERT_PATH = os.path.join(os.path.dirname(__file__), "hsbc-orca-g2.pem")
+
+
+
+Subject: Quick coffee chat / Intern introduction – [Your Name]
+
+Hi [Senior's Name],
+
+I hope you're having a good week.
+
+My name is [Your Name], and I'm currently interning in the [Your Department] team. I’m really interested in learning more about your work with [mention a specific topic/project or just "your team's division"].
+
+If you have 15 minutes to spare next week, I would love to grab a quick coffee to hear about your role and get a little career advice.
+
+I know your schedule is packed, so I'm happy to work around whatever time or day suits you best.
