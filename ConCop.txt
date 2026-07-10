@@ -1313,3 +1313,53 @@ My name is [Your Name], and I'm currently interning in the [Your Department] tea
 If you have 15 minutes to spare next week, I would love to grab a quick coffee to hear about your role and get a little career advice.
 
 I know your schedule is packed, so I'm happy to work around whatever time or day suits you best.
+
+ok i found the introduction. it's a lightweight in-browser sandbox, that supports HTML, CSS, JS and CDN packages. It's perfect for experimenting with UI components, checking simple behaviors, or sharing code examples.
+
+
+
+
+# Prompt
+Now let's think about optimizing the prompt. We know that the ultimate user journey would be:
+  1. User access the website, download a confluence space
+  2. Upload the file to the internal LLM, ask questions.
+Can we do this: add customized choices in the interface, ask for:
+  1. (most important) after they input the link and token, the tool scans the page, return all the parent pages and ask for which set of 
+parent pages do the users want to download. Of course, if they want everything, they can have enerything in the space. Ideally, this should be achieved by dropboxes.
+  2. How do they like your answers? 
+    they can choose breif / standard / detailed
+for funciton 2, we can do this through this:
+  for each choice user chooses, embed a set of words or something into the doc file. It can or cannot be visible, but the LLM must be able to read it and output based on it.
+  Also, besides customizing, I also want the answer to be sturcutred, so there should be several words fixed in the document, and the program slightly modify this based on user input.
+Based on above information, can you:
+  1. Tell me whether the above is doable
+  2. If yes, how to do it
+
+
+
+import base64
+import requests
+
+api_key = "YOUR_API_KEY"
+api_secret = "YOUR_API_SECRET"
+
+# Create "api_key:api_secret"
+credentials = f"{api_key}:{api_secret}"
+
+# Encode as Base64
+encoded = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
+
+headers = {
+    "Authorization": f"Basic {encoded}"
+}
+
+response = requests.post(
+    "https://api.highspot.com/v1.0/auth/oauth2/token",
+    headers=headers,
+    data={
+        "grant_type": "client_credentials"
+    }
+)
+
+print(response.status_code)
+print(response.json())
