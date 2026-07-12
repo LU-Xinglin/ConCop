@@ -1326,7 +1326,7 @@ Now let's think about optimizing the prompt. We know that the ultimate user jour
 Can we do this: add customized choices in the interface, ask for:
   1. (most important) after they input the link and token, the tool scans the page, return all the parent pages and ask for which set of 
 parent pages do the users want to download. Of course, if they want everything, they can have enerything in the space. Ideally, this should be achieved by dropboxes.
-  2. How do they like your answers? 
+  2. How do they like their answers? 
     they can choose breif / standard / detailed
 for funciton 2, we can do this through this:
   for each choice user chooses, embed a set of words or something into the doc file. It can or cannot be visible, but the LLM must be able to read it and output based on it.
@@ -1363,3 +1363,120 @@ response = requests.post(
 
 print(response.status_code)
 print(response.json())
+
+
+
+
+def get_root_pages(space_key: str) -> list[dict]:
+    """
+    Scans space page hierarchy. Automatically detects when a space uses a single 
+    Space Home page at Level 0 and promotes Level 1 children to visible UI categories.
+    """
+    pages, start, batch = [], 0, 100
+    while True:
+        url = f"{BASE_URL}/rest/api/content"
+        params = {
+            "spaceKey": space_key,
+            "type": "page",
+            "status": "current",
+            "expand": "ancestors",
+            "start": start,
+            "limit": batch,
+        }
+        try:
+            r = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH, timeout=20)
+            results = r.json().get("results", [])
+            pages.extend(results)
+            if len(results) < batch:
+                break
+            start += batch
+        except Exception as e:
+            print(f"[ERROR scanning root pages]: {e}")
+            break
+            
+    level_0 = [p for p in pages if len(p.get("ancestors", [])) == 0]
+    level_1 = [p for p in pages if len(p.get("ancestors", [])) == 1]
+    
+    # If the space relies on a single root homepage (standard Confluence behavior),
+    # the logical sidebar folders seen by the user are actually its Level 1 children.
+    if len(level_0) <= 1 and len(level_1) > 0:
+        target_pages = level_1
+    else:
+        target_pages = level_0
+        
+    return sorted([{"id": str(p["id"]), "title": p["title"]} for p in target_pages], key=lambda x: x["title"])
+
+def filter_page_tree(all_pages: list[dict], selected_parent_ids: list[str]) -> list[dict]:
+    """Filters out any pages that do not belong to the selected parent hierarchies."""
+    if not selected_parent_ids or "ALL" in selected_parent_ids:
+        return all_pages
+        
+    set_parent_ids = {str(i) for i in selected_parent_ids}
+    filtered = []
+    
+    for page in all_pages:
+        page_id = str(page.get("id"))
+        ancestor_ids = {str(anc.get("id")) for anc in page.get("ancestors", [])}
+        
+        # Keep page if it IS a selected category or a CHILD of a selected category
+        if page_id in set_parent_ids or not ancestor_ids.isdisjoint(set_parent_ids):
+            filtered.append(page)
+            
+    return filtered
+
+
+
+
+
+
+
+function toggleAllChecks(state) {
+            document.querySelectorAll('input[name="selected_parents"]').forEach(cb => cb.checked = state);
+        }
+
+        scanBtn.addEventListener("click", async () => {
+            const spaceUrl = document.getElementById("space_url").value.trim();
+            const token = document.getElementById("token").value.trim();
+            
+            if(!spaceUrl || !token) {
+                alert("Please complete address parameters and security token inputs before scanning.");
+                return;
+            }
+
+            scanBtn.disabled = true;
+            scanBtn.textContent = "Scanning Space Map...";
+
+            const fData = new FormData();
+            fData.append("space_url", spaceUrl);
+            fData.append("token", token);
+
+            try {
+                const res = await fetch("/scan", { method: "POST", body: fData });
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
+
+                // Build child nodes inside UI
+                parentContainer.innerHTML = "";
+                
+                // Helper bar for rapid Select All / Clear
+                const bar = document.createElement("div");
+                bar.style.cssText = "padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 11px; font-weight: bold; cursor: pointer;";
+                bar.innerHTML = `<span onclick="toggleAllChecks(true)" style="color: var(--accent);">✓ Select All Categories</span> <span onclick="toggleAllChecks(false)" style="color: var(--muted);">✕ Clear Selection</span>`;
+                parentContainer.appendChild(bar);
+
+                data.roots.forEach(r => {
+                    const lbl = document.createElement("label");
+                    lbl.className = "checkbox-item";
+                    // Checked by default for user convenience
+                    lbl.innerHTML = `<input type="checkbox" name="selected_parents" value="${r.id}" checked> <span>${r.title}</span>`;
+                    parentContainer.appendChild(lbl);
+                });
+
+                configPanel.style.display = "block";
+                scanBtn.style.display = "none";
+            } catch(e) {
+                alert("Scan failed: " + e.message);
+                scanBtn.disabled = false;
+                scanBtn.textContent = "Scan Target Space";
+            }
+        });
