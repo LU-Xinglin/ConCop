@@ -1,160 +1,141 @@
-"""
-app.py - Confluence Knowledge Base Portal
-------------------------------------------
-Runs a lightweight Flask web server that lets colleagues trigger a
-Confluence space export and download the resulting Word document.
-
-Usage:
-    pip install flask requests urllib3 python-docx beautifulsoup4 lxml
-    python app.py
-
-Then open http://<your-machine-ip>:8080 in a browser on the internal network.
-"""
-
 import os
 import uuid
 import threading
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file, abort
-
-# Import the export logic from ConCop_export.py (same folder)
 import ConCop_export as exporter
 
 app = Flask(__name__)
 
-# --- Output folder (all generated docs land here) ---
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "generated")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# --- In-memory job tracker ---
-# { job_id: { "status": "running"|"done"|"error", "file": path, "message": str } }
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
 
+def extract_space_key(url: str) -> str:
+    """Helper to cleanly extract the space key string from varied Confluence URLs."""
+    if "/spaces/" in url:
+        return url.split("/spaces/")[1].split("/")[0].strip()
+    return ""
 
-def run_export(job_id: str, space_key: str, token: str, cert_path: str):
-    """
-    Background thread: runs the Confluence export and updates the job record.
-    """
+def run_export(job_id: str, space_key: str, token: str, selected_parents: list[str], verbosity: str, include_images: bool):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{space_key}_{timestamp}.docx"
     filepath = os.path.join(OUTPUT_DIR, filename)
-
     try:
-        # Patch the exporter's runtime config for this request
-        exporter.BASE_URL = exporter.BASE_URL  # keep default
+        # Re-initialize runtime context headers per request channel safely
+        exporter.BASE_URL = "https://alm-confluence.systems.uk.hsbc/confluence"
         exporter.HEADERS = {"Authorization": f"Bearer {token}"}
         exporter.CERT_PATH = os.path.join(os.path.dirname(__file__), "hsbc-orca-g2.pem")
-        # exporter.CERT_PATH = cert_path if cert_path else False
         exporter.SPACE_KEY = space_key
         exporter.OUTPUT = filepath
 
-        pages = exporter.get_all_pages(space_key)
-        if not pages:
-            raise ValueError(
-                f"No pages found in space '{space_key}'. "
-                f"Check the space key and token permissions."
-            )
+        # Step A: Fetch all raw data from server
+        all_pages = exporter.get_all_pages(space_key)
+        if not all_pages:
+            raise ValueError(f"No content matching space key '{space_key}' found.")
 
-        exporter.build_knowledge_base(pages, output_file=filepath)
+        # Step B: Filter data dynamically down to selected subset paths if targeted
+        target_pages = exporter.filter_page_tree(all_pages, selected_parents)
+        if not target_pages:
+            raise ValueError("The structural configuration criteria filtered out all available child pages.")
 
+        # Step C: Write file out cleanly
+        exporter.build_knowledge_base(
+            pages=target_pages,
+            output_file=filepath,
+            verbosity=verbosity,
+            include_images=include_images
+        )
         with jobs_lock:
             jobs[job_id] = {
                 "status": "done",
                 "file": filepath,
                 "filename": filename,
-                "pages": len(pages),
+                "pages": len(target_pages),
                 "links": len(exporter._LINK_REGISTRY),
-                "message": f"Export complete - {len(pages)} pages, {len(exporter._LINK_REGISTRY)} links collected.",
+                "message": f"Successfully completed engine execution pipeline.",
             }
-
     except Exception as e:
         if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-            except Exception:
-                pass
+            try: os.remove(filepath)
+            except Exception: pass
         with jobs_lock:
             jobs[job_id] = {"status": "error", "message": str(e)}
-
-
-# --- Routes ---
-
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
+@app.route("/scan", methods=["POST"])
+def scan_space():
+    """Validates parameters and returns top-level sections for the UI dropboxes."""
+    space_url = request.form.get("space_url", "").strip()
+    token = request.form.get("token", "").strip()
+    
+    space_key = extract_space_key(space_url)
+    if not space_url or not space_key:
+        return jsonify({"error": "Invalid Confluence link structure. Ensure it includes /spaces/KEY/"}), 400
+    if not token:
+        return jsonify({"error": "Active personal workspace token required."}), 400
+
+    # Provision temporary global scopes to scan root indices
+    exporter.HEADERS = {"Authorization": f"Bearer {token}"}
+    exporter.CERT_PATH = os.path.join(os.path.dirname(__file__), "hsbc-orca-g2.pem")
+    
+    roots = exporter.get_root_pages(space_key)
+    if not roots:
+        return jsonify({"error": "Could not extract or establish connection to root nodes in space."}), 400
+        
+    return jsonify({"space_key": space_key, "roots": roots})
 
 @app.route("/export", methods=["POST"])
 def start_export():
-    """
-    Accepts form data, kicks off a background export job, returns the job ID.
-    """
     space_url = request.form.get("space_url", "").strip()
-    space_key = ""
-    
-    if "/spaces/" in space_url:
-        space_key = space_url.split("/spaces/")[1].split("/")[0].strip()
-        
     token = request.form.get("token", "").strip()
-    cert_path = request.form.get("cert_path", "").strip()
+    verbosity = request.form.get("verbosity", "standard").strip()
+    include_images = request.form.get("include_images") == "true"
+    
+    # Retrieve structural page selection list from array fields
+    selected_parents = request.form.getlist("selected_parents")
 
-    if not space_url:
-        return jsonify({"error": "Please paste a Confluence page URL."}), 400
-    if not space_key:
-        return jsonify({"error": "Could not identify the space from that URL. Make sure it contains /spaces/SPACEKEY/"}), 400
-    if not token:
-        return jsonify({"error": "Bearer token is required."}), 400
+    space_key = extract_space_key(space_url)
+    if not space_key or not token:
+        return jsonify({"error": "Missing fundamental parameters required by execution engine."}), 400
 
     job_id = str(uuid.uuid4())
     with jobs_lock:
-        jobs[job_id] = {"status": "running", "message": "Export started..."}
+        jobs[job_id] = {"status": "running", "message": "Compiling structured parameters..."}
 
     thread = threading.Thread(
         target=run_export,
-        args=(job_id, space_key, token, cert_path),
+        args=(job_id, space_key, token, selected_parents, verbosity, include_images),
         daemon=True
     )
     thread.start()
-
     return jsonify({"job_id": job_id})
-
 
 @app.route("/status/<job_id>")
 def job_status(job_id: str):
-    """Polled by the front-end every 2 s to check progress."""
     with jobs_lock:
         job = jobs.get(job_id)
-    if not job:
-        return jsonify({"error": "Job not found."}), 404
+    if not job: return jsonify({"error": "Job reference identifier missing."}), 404
     return jsonify(job)
-
 
 @app.route("/download/<job_id>")
 def download(job_id: str):
-    """Serves the generated .docx file as a download."""
     with jobs_lock:
         job = jobs.get(job_id)
-        
-    if not job or job.get("status") != "done":
-        abort(404)
-        
+    if not job or job.get("status") != "done": abort(404)
     filepath = job.get("file")
-    if not filepath or not os.path.exists(filepath):
-        abort(404)
-        
+    if not filepath or not os.path.exists(filepath): abort(404)
     return send_file(
         filepath,
         as_attachment=True,
         download_name=job.get("filename", "knowledge_base.docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        conditional=False
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-
-# --- Entry point ---
-
 if __name__ == "__main__":
-    # host="0.0.0.0" makes it reachable from other machines on the same network
     app.run(host="0.0.0.0", port=8080, debug=False)

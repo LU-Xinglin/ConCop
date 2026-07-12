@@ -1,13 +1,3 @@
-"""
-ConCop_export.py
-----------------
-Pulls every page from a Confluence space and concatenates them into a single
-Word document that mirrors Confluence's native Word-export quality.
-
-Requirements:
-    pip install requests urllib3 python-docx beautifulsoup4 lxml
-"""
-
 import re
 import os
 import io
@@ -23,44 +13,35 @@ from docx.oxml.ns import qn
 
 urllib3.disable_warnings()
 
-# --- XML sanitisation ---
-_ILLEGAL_XML_CHARS_RE = re.compile(
-    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffe\uffff]"
-)
-
+_ILLEGAL_XML_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffe\uffff]")
 
 def _sanitize_text(text) -> str:
-    """Strip characters that are illegal in XML 1.0 so Word can't choke on them."""
     if text is None:
         return ""
     if not isinstance(text, str):
         text = str(text)
     return _ILLEGAL_XML_CHARS_RE.sub("", text)
 
-
-# --- CONFIG ---
+# --- BASE RUNTIME CONFIG (Overridden by app.py) ---
 BASE_URL = "https://alm-confluence.systems.uk.hsbc/confluence"
 HEADERS = {"Authorization": "Bearer YOUR_TOKEN_HERE"}
 CERT_PATH = r"C:\Users\45451061\certs\hsbc-orca-g2.pem"
 SPACE_KEY = "AGRCKB"
 OUTPUT = "knowledge_base.docx"
 
-
-# --- Confluence API ---
-
+_LINK_REGISTRY: list[tuple[str, str, str]] = []
+_CURRENT_PAGE_TITLE: str = ""
 
 def get_space_title(space_key: str) -> str:
-    """Fetch the display name of a Confluence space."""
     url = f"{BASE_URL}/rest/api/space/{space_key}"
-    r = requests.get(url, headers=HEADERS, verify=CERT_PATH)
-    return r.json().get("name", space_key)
-
+    try:
+        r = requests.get(url, headers=HEADERS, verify=CERT_PATH, timeout=10)
+        return r.json().get("name", space_key)
+    except Exception:
+        return space_key
 
 def get_all_pages(space_key: str) -> list[dict]:
-    """
-    Fetch ALL pages from the space with export_view body.
-    Uses correct pagination: stops when a batch returns fewer results than requested.
-    """
+    """Fetch all space pages using the paginated export_view API endpoint."""
     pages, start, batch = [], 0, 50
     while True:
         url = f"{BASE_URL}/rest/api/content"
@@ -72,38 +53,67 @@ def get_all_pages(space_key: str) -> list[dict]:
             "start": start,
             "limit": batch,
         }
-        r = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH)
+        r = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH, timeout=20)
         data = r.json()
         results = data.get("results", [])
         pages.extend(results)
         
-        print(f"Fetched so far: {len(pages)} (this batch: {len(results)}, start={start})")
         if len(results) < batch:
             break
         start += batch
     return pages
 
+def get_root_pages(space_key: str) -> list[dict]:
+    """Scans and retrieves only top-level (root) pages for the UI dropdown selection."""
+    url = f"{BASE_URL}/rest/api/content"
+    params = {
+        "spaceKey": space_key,
+        "type": "page",
+        "status": "current",
+        "expand": "ancestors",
+        "limit": 999
+    }
+    try:
+        r = requests.get(url, headers=HEADERS, params=params, verify=CERT_PATH, timeout=20)
+        all_content = r.json().get("results", [])
+        # A root page has zero ancestors in Confluence
+        roots = [{"id": p["id"], "title": p["title"]} for p in all_content if len(p.get("ancestors", [])) == 0]
+        return sorted(roots, key=lambda x: x["title"])
+    except Exception as e:
+        print(f"[ERROR scanning root pages]: {e}")
+        return []
 
-# --- Hyperlink & Image helpers ---
-
+def filter_page_tree(all_pages: list[dict], selected_parent_ids: list[str]) -> list[dict]:
+    """Filters out any pages that do not belong to the selected parent hierarchies."""
+    if not selected_parent_ids or "ALL" in selected_parent_ids:
+        return all_pages
+        
+    set_parent_ids = set(selected_parent_ids)
+    filtered = []
+    
+    for page in all_pages:
+        page_id = page.get("id")
+        ancestor_ids = {anc.get("id") for anc in page.get("ancestors", [])}
+        
+        # Keep page if it IS a selected parent or a CHILD of a selected parent
+        if page_id in set_parent_ids or not ancestor_ids.isdisjoint(set_parent_ids):
+            filtered.append(page)
+            
+    return filtered
 
 def _ensure_hyperlink_style(doc: Document):
-    """Ensure the 'Hyperlink' character style exists in the document."""
     styles = doc.styles
     try:
         styles["Hyperlink"] = styles["Hyperlink"]
         return
     except KeyError:
         pass
-
     style_elem = OxmlElement("w:style")
     style_elem.set(qn("w:type"), "character")
     style_elem.set(qn("w:styleId"), "Hyperlink")
-
     name_elem = OxmlElement("w:name")
     name_elem.set(qn("w:val"), "Hyperlink")
     style_elem.append(name_elem)
-
     rPr = OxmlElement("w:rPr")
     color = OxmlElement("w:color")
     color.set(qn("w:val"), "0563C1")
@@ -111,271 +121,187 @@ def _ensure_hyperlink_style(doc: Document):
     u = OxmlElement("w:u")
     u.set(qn("w:val"), "single")
     rPr.append(u)
-
     style_elem.append(rPr)
     doc.styles.element.append(style_elem)
 
-
-def _resolve_href(href: str, classes: list) -> str:
-    """Normalise a Confluence href or img src to an absolute URL."""
-    if not href:
-        return ""
-    if href.startswith("http"):
-        return href
+def _resolve_href(href: str) -> str:
+    if not href: return ""
+    if href.startswith("http"): return href
     if href.startswith("/confluence"):
-        domain = BASE_URL.split("/confluence")[0]
-        return domain + href
+        return BASE_URL.split("/confluence")[0] + href
     if href.startswith("/"):
         return BASE_URL.rstrip("/") + href
     return href
 
-
 def _sanitize_url(url: str) -> str:
-    """Encode special characters in URLs so Word's XML relationship store doesn't choke."""
     try:
         parsed = urlparse(url)
         clean_path = quote(parsed.path, safe="/-._~:/?#[]@!$&'()*+,;=")
-        return urlunparse((
-            parsed.scheme, parsed.netloc, clean_path,
-            parsed.params, parsed.query, parsed.fragment
-        ))
+        return urlunparse((parsed.scheme, parsed.netloc, clean_path, parsed.params, parsed.query, parsed.fragment))
     except Exception:
         return ""
 
-
 def _fetch_image(url: str) -> io.BytesIO | None:
-    """Downloads an image using the established session headers and returns a byte stream."""
-    if not url or url.startswith("data:"):
-        return None
+    if not url or url.startswith("data:"): return None
     try:
-        r = requests.get(url, headers=HEADERS, verify=CERT_PATH, timeout=15, stream=True)
+        r = requests.get(url, headers=HEADERS, verify=CERT_PATH, timeout=10, stream=True)
         r.raise_for_status()
         return io.BytesIO(r.content)
-    except Exception as e:
-        print(f"[Image skipped - bad URL or timeout] {url!r}: {e}")
+    except Exception:
         return None
-
-
-# --- Link collector for appendix ---
-_LINK_REGISTRY: list[tuple[str, str, str]] = []
-_CURRENT_PAGE_TITLE: str = ""
-
 
 def _register_link(display_text: str, url: str):
     if url:
         _LINK_REGISTRY.append((_CURRENT_PAGE_TITLE, display_text.strip(), url))
 
-
-# --- Hyperlink XML builder ---
-
-
 def _add_hyperlink(paragraph, url: str, display_text: str):
-    """
-    Insert a properly styled, clickable hyperlink into a paragraph.
-    Sanitises the URL before embedding to prevent Word XML corruption.
-    """
-    if not url or not display_text:
-        return
-
+    if not url or not display_text: return
     display_text = _sanitize_text(display_text)
-    if not display_text:
-        return
-
+    if not display_text: return
     url = _sanitize_url(url)
     if not url:
         paragraph.add_run(display_text)
         return
-
     _register_link(display_text, url)
-
     part = paragraph.part
     try:
-        r_id = part.relate_to(
-            url,
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-            is_external=True
-        )
-    except Exception as e:
-        print(f"[Hyperlink skipped - bad URL] {url!r}: {e!r}")
+        r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
+    except Exception:
         paragraph.add_run(display_text)
         return
-
     hyperlink = OxmlElement("w:hyperlink")
     hyperlink.set(qn("w:rId"), r_id)
-
     run_elem = OxmlElement("w:r")
     rPr = OxmlElement("w:rPr")
     rStyle = OxmlElement("w:rStyle")
     rStyle.set(qn("w:val"), "Hyperlink")
     rPr.append(rStyle)
     run_elem.append(rPr)
-
     t = OxmlElement("w:t")
     t.text = display_text
     if display_text != display_text.strip():
         t.set(qn("xml:space"), "preserve")
     run_elem.append(t)
-
     hyperlink.append(run_elem)
     paragraph._p.append(hyperlink)
 
-
-# --- Inline text/run builder ---
-
-
-def _add_text_runs(paragraph, node):
-    """Recursively walk a BS4 node, emitting Word runs with inline formatting."""
+def _add_text_runs(paragraph, node, include_images: bool):
     if isinstance(node, NavigableString):
         text = _sanitize_text(str(node))
-        if not text:
-            return
+        if not text: return
         run = paragraph.add_run(text)
         for parent in node.parents:
-            if not isinstance(parent, Tag):
-                break
+            if not isinstance(parent, Tag): break
             n = parent.name
-            if n in ("strong", "b"):   run.bold = True
-            if n in ("em", "i"):       run.italic = True
-            if n == "u":               run.underline = True
+            if n in ("strong", "b"): run.bold = True
+            if n in ("em", "i"): run.italic = True
+            if n == "u": run.underline = True
             if n in ("code", "tt"):
                 run.font.name = "Courier New"
                 run.font.size = Pt(10)
-            if n in ("p", "li", "td", "th", "div", "body"):
-                break
+            if n in ("p", "li", "td", "th", "div", "body"): break
     elif isinstance(node, Tag):
         if node.name == "img":
+            if not include_images:
+                # User toggled off images to maximize AI performance
+                run = paragraph.add_run("[Image omitted to optimize AI processing speed]")
+                run.italic = True
+                run.font.color.rgb = RGBColor(0x76, 0x76, 0x76)
+                return
             src = node.get("src", "").strip()
             if src:
-                resolved_src = _resolve_href(src, [])
-                img_stream = _fetch_image(resolved_src)
+                img_stream = _fetch_image(_resolve_href(src))
                 if img_stream:
                     try:
-                        # Limiting width to 5.5 Inches keeps it safely within standard document margins
                         paragraph.add_run().add_picture(img_stream, width=Inches(5.5))
-                    except Exception as e:
-                        print(f"[ERROR] Cannot insert inline image {resolved_src}: {e}")
+                    except Exception:
+                        pass
         elif node.name == "a":
             href = node.get("href", "").strip()
             display = node.get_text(strip=False)
-            classes = node.get("class", [])
             if href and display.strip():
-                resolved = _resolve_href(href, classes)
-                if resolved:
-                    _add_hyperlink(paragraph, resolved, display)
-                else:
-                    paragraph.add_run(_sanitize_text(display))
+                _add_hyperlink(paragraph, _resolve_href(href), display)
             else:
                 for child in node.children:
-                    _add_text_runs(paragraph, child)
+                    _add_text_runs(paragraph, child, include_images)
         else:
             for child in node.children:
-                _add_text_runs(paragraph, child)
+                _add_text_runs(paragraph, child, include_images)
 
-
-# --- Table builder ---
-
-
-def _process_table(doc: Document, table_tag: Tag):
-    """Convert an HTML <table> to a python-docx Table."""
+def _process_table(doc: Document, table_tag: Tag, include_images: bool):
     rows_html = table_tag.find_all("tr")
-    if not rows_html:
-        return
-
+    if not rows_html: return
     first_row_cells = rows_html[0].find_all(["td", "th"])
     n_cols = sum(int(c.get("colspan", 1)) for c in first_row_cells)
-    if n_cols == 0:
-        return
-
+    if n_cols == 0: return
     table = doc.add_table(rows=0, cols=n_cols)
     table.style = "Table Grid"
-
     for tr in rows_html:
         cells_html = tr.find_all(["td", "th"])
         row = table.add_row()
         col_idx = 0
         for cell_html in cells_html:
-            if col_idx >= n_cols:
-                break
+            if col_idx >= n_cols: break
             cell = row.cells[col_idx]
-            is_header = cell_html.name == "th"
             p = cell.paragraphs[0]
-            _add_text_runs(p, cell_html)
-            if is_header:
-                for run in p.runs:
-                    run.bold = True
+            _add_text_runs(p, cell_html, include_images)
+            if cell_html.name == "th":
+                for run in p.runs: run.bold = True
             col_idx += int(cell_html.get("colspan", 1))
 
-
-# --- List builder ---
-
-
-def _process_list(doc: Document, list_tag: Tag, level: int = 0):
-    """Recursively process <ul>/<ol>, supporting nesting."""
+def _process_list(doc: Document, list_tag: Tag, level: int = 0, include_images: bool = True):
     ordered = list_tag.name == "ol"
     for li in list_tag.find_all("li", recursive=False):
-        style = "List Number" if ordered else "List Bullet"
-        p = doc.add_paragraph(style=style)
+        p = doc.add_paragraph(style="List Number" if ordered else "List Bullet")
         p.paragraph_format.left_indent = Inches(0.25 * (level + 1))
-
         for child in li.children:
             if isinstance(child, NavigableString):
                 cleaned = _sanitize_text(str(child))
-                if cleaned.strip():
-                    p.add_run(cleaned)
+                if cleaned.strip(): p.add_run(cleaned)
             elif isinstance(child, Tag) and child.name not in ("ul", "ol"):
-                _add_text_runs(p, child)
-
+                _add_text_runs(p, child, include_images)
         for nested in li.find_all(["ul", "ol"], recursive=False):
-            _process_list(doc, nested, level + 1)
+            _process_list(doc, nested, level + 1, include_images)
 
-
-# --- Single element dispatcher ---
-
-
-def _process_element(doc: Document, element: Tag) -> bool:
+def _process_element(doc: Document, element: Tag, include_images: bool) -> bool:
     tag = element.name
-
     if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
         p = doc.add_paragraph(style=f"Heading {min(int(tag[1]), 4)}")
-        _add_text_runs(p, element)
+        _add_text_runs(p, element, include_images)
         return True
-
     if tag == "p":
         if element.get_text(strip=True) or element.find("img"):
             p = doc.add_paragraph()
-            _add_text_runs(p, element)
+            _add_text_runs(p, element, include_images)
         return True
-        
     if tag == "img":
+        if not include_images:
+            p = doc.add_paragraph("[Image omitted to optimize AI processing speed]")
+            p.runs[0].italic = True
+            p.runs[0].font.color.rgb = RGBColor(0x76, 0x76, 0x76)
+            return True
         src = element.get("src", "").strip()
         if src:
-            resolved_src = _resolve_href(src, [])
-            img_stream = _fetch_image(resolved_src)
+            img_stream = _fetch_image(_resolve_href(src))
             if img_stream:
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                try:
-                    p.add_run().add_picture(img_stream, width=Inches(6.0))
-                except Exception as e:
-                    print(f"[ERROR] Cannot insert block image {resolved_src}: {e}")
+                try: p.add_run().add_picture(img_stream, width=Inches(6.0))
+                except Exception: pass
         return True
-
     if tag == "pre":
         p = doc.add_paragraph(style="No Spacing")
         run = p.add_run(_sanitize_text(element.get_text()))
         run.font.name = "Courier New"
         run.font.size = Pt(9)
         return True
-
     if tag in ("ul", "ol"):
-        _process_list(doc, element, level=0)
+        _process_list(doc, element, level=0, include_images=include_images)
         return True
-
     if tag == "table":
-        _process_table(doc, element)
+        _process_table(doc, table_tag=element, include_images=include_images)
         doc.add_paragraph()
         return True
-
     if tag == "hr":
         p = doc.add_paragraph()
         pPr = p._p.get_or_add_pPr()
@@ -388,102 +314,121 @@ def _process_element(doc: Document, element: Tag) -> bool:
         pBdr.append(bottom)
         pPr.append(pBdr)
         return True
-
     return False
 
-
-# --- Main HTML -> DOCX converter ---
-
-
-def html_to_docx(doc: Document, html: str):
-    """
-    Parse export_view HTML and append content to doc.
-    Iterative queue - never recurses, handles any nesting depth.
-    """
+def html_to_docx(doc: Document, html: str, include_images: bool):
     soup = BeautifulSoup(html, "lxml")
     body = soup.find("body") or soup
     queue = list(body.children)
-
     while queue:
         node = queue.pop(0)
-
         if isinstance(node, NavigableString):
             text = _sanitize_text(str(node)).strip()
-            if text:
-                doc.add_paragraph(text)
+            if text: doc.add_paragraph(text)
             continue
-
-        if not isinstance(node, Tag):
-            continue
-
-        handled = _process_element(doc, node)
+        if not isinstance(node, Tag): continue
+        handled = _process_element(doc, node, include_images)
         if not handled:
             queue = list(node.children) + queue
 
+def inject_ai_system_prompt(doc: Document, verbosity: str):
+    """Embeds the targeted Universal Prompt engineering blocks directly onto Page 2."""
+    # Use standard stylized Callout/Box visual patterns using borders
+    p = doc.add_paragraph()
+    pPr = p._p.get_or_add_pPr()
+    pBdr = OxmlElement("w:pBdr")
+    left_border = OxmlElement("w:left")
+    left_border.set(qn("w:val"), "single")
+    left_border.set(qn("w:sz"), "24") # Thicker decorative accent line
+    left_border.set(qn("w:space"), "12")
+    left_border.set(qn("w:color"), "DB0011") # Distinct corporate red accent line
+    pBdr.append(left_border)
+    pPr.append(pBdr)
+    
+    # Text Generation
+    r_start = p.add_run("### [SYSTEM DIRECTIVE FOR AI ASSISTANT] ###\n")
+    r_start.bold = True
+    r_start.font.color.rgb = RGBColor(0xDB, 0x00, 0x11)
+    
+    body_text = (
+        "ROLE & CONTEXT: You are an Enterprise Knowledge Navigator. Your objective is to help colleagues "
+        "understand, navigate, and execute the work documented in this Confluence Knowledge Base. "
+        "You must be authoritative, adaptable, and concise.\n\n"
+        "FIXED STRUCTURAL RULES (MUST APPLY TO ALL RESPONSES):\n"
+        "1. Adaptive Intent Formatting:\n"
+        "   - If procedural (\"How do I...\", \"Steps to...\"): Output a sequential, numbered workflow.\n"
+        "   - If conceptual (\"What is...\", \"Explain...\"): Provide a clear, high-level summary followed by bulleted key components.\n"
+        "   - If troubleshooting/issues (\"I encountered an error...\", \"What if X happens?\"): Start with immediate action items, followed by documented resolution/escalation paths.\n"
+        "   - If comparative (\"Difference between X and Y\"): Use markdown tables for side-by-side comparison.\n\n"
+        "2. Hybrid Source Grounding:\n"
+        "   - Primary Priority: Base your answers mostly and primarily on the specific facts, local workflows, parameters, and policies contained within this uploaded document.\n"
+        "   - Secondary Priority: You may seamlessly integrate your pretrained internal enterprise and technical knowledge if applicable (e.g., to bridge context gaps, clarify standard company terminology, or explain foundational engineering/business concepts not fully elaborated in the text).\n"
+        "   - Missing Context: If a query cannot be answered using either this document or your foundational internal training, explicitly state: \"This specific topic is not covered in the provided Knowledge Base or standard internal guidelines.\"\n\n"
+        "3. Precision & Navigation: Always retain exact system names, team acronyms, error codes, and parameter names. "
+        "Whenever applicable, reference the specific Page Title or Section Heading from this document where the primary information was located.\n\n"
+    )
+    p.add_run(body_text)
+    
+    # Inject active selected mode verbosity statement block
+    r_verb = p.add_run("DYNAMIC CONFIGURATION STATUS:\n")
+    r_verb.bold = True
+    
+    if verbosity == "brief":
+        v_str = "**VERBOSITY LEVEL: BRIEF — RAPID REFERENCE.** Deliver a \"TL;DR\" response. Provide only the essential facts, direct answers, or immediate execution steps. Maximum 3 to 5 bullets or numbered steps. Strip away background context, historical notes, and non-essential commentary."
+    elif verbosity == "detailed":
+        v_str = "**VERBOSITY LEVEL: DETAILED — COMPREHENSIVE DEEP DIVE.** Provide an exhaustive, granular breakdown. Leave no detail out. Include complete background context, all documented prerequisites, technical edge cases, exceptions, and every related cross-reference found across the space."
+    else:
+        v_str = "**VERBOSITY LEVEL: STANDARD — PROFESSIONAL WORKPLACE RESPONSE.** Balance clarity and depth. Provide a direct answer first, followed by the necessary operating context, structured details, and relevant examples or links mentioned in the text."
+        
+    p.add_run(v_str + "\n\n")
+    p.add_run("### [END SYSTEM DIRECTIVE] ###").bold = True
 
-# --- Document builder ---
-
-
-def build_knowledge_base(pages: list[dict], output_file: str = OUTPUT):
+def build_knowledge_base(pages: list[dict], output_file: str = OUTPUT, verbosity: str = "standard", include_images: bool = True):
     global _LINK_REGISTRY, _CURRENT_PAGE_TITLE
     _LINK_REGISTRY = []
-
     doc = Document()
     _ensure_hyperlink_style(doc)
-
-    print(f"Fetching space title for '{SPACE_KEY}'...")
     space_title = get_space_title(SPACE_KEY)
 
-    # # Cover page
+    # Cover Page
     title = doc.add_heading(_sanitize_text(space_title), level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    doc.add_paragraph(f"Space: {_sanitize_text(SPACE_KEY)} - auto-generated via Confluence export_view API")
+    doc.add_paragraph(f"Space: {_sanitize_text(SPACE_KEY)} - auto-generated via Confluence Portal configuration.")
     doc.add_page_break()
 
-    # # Table of contents
+    # Page 2: System Guidance Prompt Engineering
+    doc.add_heading("AI Processing Parameters", level=1)
+    inject_ai_system_prompt(doc, verbosity)
+    doc.add_page_break()
+
+    # Table of Contents
     doc.add_heading("Contents", level=1)
     for i, page in enumerate(pages, 1):
         doc.add_paragraph(f"{i}. {_sanitize_text(page['title'])}", style="List Number")
     doc.add_page_break()
 
-    # # Page content
+    # Process Pages
     for page in pages:
-        print(f"Processing: {page['title']}")
         clean_title = _sanitize_text(page["title"])
-        
-        global _CURRENT_PAGE_TITLE
         _CURRENT_PAGE_TITLE = clean_title
-
         doc.add_heading(clean_title, level=1)
-
         ancestors = page.get("ancestors", [])
         if ancestors:
             path = " > ".join(_sanitize_text(a["title"]) for a in ancestors)
             p = doc.add_paragraph(f"Path: {path}")
             p.runs[0].font.color.rgb = RGBColor(0x70, 0x70, 0x70)
             p.runs[0].font.size = Pt(9)
-
         html_content = page.get("body", {}).get("export_view", {}).get("value", "")
-
         if html_content.strip():
-            try:
-                html_to_docx(doc, html_content)
-            except Exception as e:
-                print(f"[ERROR on page '{page['title']}']: {e}")
-                doc.add_paragraph(f"[Error processing this page: {e}]")
+            try: html_to_docx(doc, html_content, include_images)
+            except Exception as e: doc.add_paragraph(f"[Error processing page contents: {e}]")
         else:
             doc.add_paragraph("[No content]")
-
         doc.add_page_break()
 
-    # # Appendix
+    # Appendix Setup
     if _LINK_REGISTRY:
         doc.add_heading("Appendix: Links Referenced", level=1)
-        doc.add_paragraph(
-            "The list below contains every hyperlink found in the pages above, "
-            "grouped by the page it appeared on, in plain-text form."
-        )
-        
         current_page = None
         counter = 0
         for page_title, display_text, url in _LINK_REGISTRY:
@@ -495,14 +440,4 @@ def build_knowledge_base(pages: list[dict], output_file: str = OUTPUT):
             p = doc.add_paragraph()
             p.add_run(f"{counter}. {display_text}: ").bold = True
             p.add_run(url)
-
     doc.save(output_file)
-    print(f"\n[+] Saved {len(pages)} pages -> {output_file}")
-    print(f"[+] Appendix contains {len(_LINK_REGISTRY)} links across {len(set(p for p,_,_ in _LINK_REGISTRY))} pages.")
-
-
-if __name__ == "__main__":
-    print(f"Fetching all pages from space '{SPACE_KEY}'...")
-    pages = get_all_pages(SPACE_KEY)
-    print(f"Found {len(pages)} pages. Building document...")
-    build_knowledge_base(pages)
