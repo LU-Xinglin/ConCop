@@ -1480,3 +1480,83 @@ function toggleAllChecks(state) {
                 scanBtn.textContent = "Scan Target Space";
             }
         });
+
+import glob
+import os
+import pandas as pd
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+OUTPUT_FILE = "cases_to_chase.xlsx"
+DATE_COLUMN = "Due Date"  # Replace with her actual date header name
+STATUS_COLUMN = "Status"  # Replace with her actual status header name
+
+# Your 8 specific columns to keep
+COLUMNS_TO_KEEP = ["A", "B", "C", "D", "E", "F", "G", "H"]
+
+# ==========================================
+# 1. SMART FILE DETECTION
+# ==========================================
+# Scans ONLY the root project folder for .xlsx files (ignores subfolders like 'old excels')
+# Excludes temporary Excel lock files (~$) and the previous output file if it's sitting there
+excel_files = [
+    f
+    for f in glob.glob("*.xlsx")
+    if not f.startswith("~$") and f != OUTPUT_FILE
+]
+
+if len(excel_files) == 0:
+    print("ERROR: No Excel file found in the main project folder.")
+    print("Please paste the downloaded Excel file here (above the old folder).")
+    exit()
+elif len(excel_files) > 1:
+    # Sort by modification time so the most recently downloaded file is picked first
+    excel_files.sort(key=os.path.getmtime, reverse=True)
+    print(f"WARNING: Multiple Excel files found in the root folder.")
+    print(f"--> Automatically selecting the newest one: '{excel_files[0]}'")
+
+INPUT_FILE = excel_files[0]
+print(f"--> Reading file: '{INPUT_FILE}'")
+
+# ==========================================
+# 2. MAIN FILTERING LOGIC
+# ==========================================
+try:
+    df = pd.read_excel(INPUT_FILE)
+
+    # Convert the date column to proper datetime objects
+    df[DATE_COLUMN] = pd.to_datetime(df[DATE_COLUMN], errors="coerce")
+
+    # Calculate exact last day of the previous month (handles 28, 29, 30, and 31 days automatically)
+    today = pd.Timestamp.today().normalize()
+    cutoff_date = today.replace(day=1) - pd.Timedelta(days=1)
+    print(
+        f"--> Filtering for 'Open' cases due on or before: {cutoff_date.strftime('%Y-%m-%d')}"
+    )
+
+    # Apply Filters: Time <= end of last month AND Status == Open
+    time_condition = df[DATE_COLUMN] <= cutoff_date
+    status_condition = (
+        df[STATUS_COLUMN].astype(str).str.strip().str.lower() == "open"
+    )
+
+    filtered_df = df[time_condition & status_condition]
+
+    # Filter out everything except your 8 target columns
+    final_df = filtered_df[COLUMNS_TO_KEEP]
+
+    # Export to Excel
+    final_df.to_excel(OUTPUT_FILE, index=False)
+    print(
+        f"\nSUCCESS! {len(final_df)} cases extracted and saved to '{OUTPUT_FILE}'."
+    )
+
+except KeyError as e:
+    print(f"\nERROR: A required column header was not found in the Excel file.")
+    print(f"Missing Header Name: {e}")
+    print(
+        "Please double-check that DATE_COLUMN, STATUS_COLUMN, and COLUMNS_TO_KEEP match the spreadsheet exactly."
+    )
+except Exception as e:
+    print(f"\nAn unexpected error occurred: {e}")
