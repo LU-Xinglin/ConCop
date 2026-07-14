@@ -1560,3 +1560,7 @@ except KeyError as e:
     )
 except Exception as e:
     print(f"\nAn unexpected error occurred: {e}")
+
+python filter_cases.py
+pyinstaller --onefile filter_cases.py
+deactivate
