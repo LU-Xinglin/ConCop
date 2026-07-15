@@ -1564,3 +1564,152 @@ except Exception as e:
 python filter_cases.py
 pyinstaller --onefile filter_cases.py
 deactivate
+
+
+
+import glob
+import os
+import pandas as pd
+import win32com.client as win32  # Required for talking to Outlook
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+OUTPUT_FILE = "cases_to_chase.xlsx"
+DATE_COLUMN = "Monitoring Period End Date"  # Replace with her actual date header name
+STATUS_COLUMN = (
+    "Monitoring Result Status"  # Replace with her actual status header name
+)
+
+# Your 8 specific columns to keep
+COLUMNS_TO_KEEP = [
+    "Control Location",
+    "Control ID",
+    "Control Title (Alias)",
+    "Control Owner",
+    "Monitoring Result Status",
+    "Monitoring Aspect",
+    "Monitoring Period Start Date",
+    "Monitoring Period End Date",
+]
+
+# --- EMAIL DRAFT SETTINGS ---
+EMAIL_TO = "recipient@company.com; another_person@company.com"  # Separate multiple emails with a semicolon
+EMAIL_CC = "manager@company.com"  # Leave as empty string "" if nobody to CC
+EMAIL_SUBJECT = "ACTION REQUIRED: Open Monitoring Cases for Follow-up"
+
+# Write your email text using basic HTML tags (<p> for paragraphs, <br> for line breaks, <b> for bold)
+EMAIL_BODY_TOP = """
+<p>Hi Team,</p>
+<p>Please find below the open monitoring cases from the previous month that require your attention and follow-up.</p>
+<p>Please review your respective controls and update the monitoring status accordingly:</p>
+"""
+
+EMAIL_BODY_BOTTOM = """
+<br>
+<p>The full data file is also attached to this email for your convenience.</p>
+<p>Best regards,<br><b>Monitoring & Compliance Team</b></p>
+"""
+
+# ==========================================
+# 1. SMART FILE DETECTION
+# ==========================================
+excel_files = [
+    f
+    for f in glob.glob("*.xlsx")
+    if not f.startswith("~$") and f != OUTPUT_FILE
+]
+
+if len(excel_files) == 0:
+    print("ERROR: No Excel file found in the main project folder.")
+    print(
+        "Please paste the downloaded Excel file here (above the old folder)."
+    )
+    exit()
+elif len(excel_files) > 1:
+    excel_files.sort(key=os.path.getmtime, reverse=True)
+    print(f"WARNING: Multiple Excel files found in the root folder.")
+    print(f"--> Automatically selecting the newest one: '{excel_files[0]}'")
+
+INPUT_FILE = excel_files[0]
+print(f"--> Reading file: '{INPUT_FILE}'")
+
+# ==========================================
+# 2. MAIN FILTERING LOGIC
+# ==========================================
+try:
+    df = pd.read_excel(INPUT_FILE)
+
+    # Convert the date column to proper datetime objects
+    df[DATE_COLUMN] = pd.to_datetime(df[DATE_COLUMN], errors="coerce")
+
+    # Calculate the 1st day of this month, and the 1st and last day of last month
+    today = pd.Timestamp.today().normalize()
+    start_of_this_month = today.replace(day=1)
+    end_of_last_month = start_of_this_month - pd.Timedelta(days=1)
+    start_of_last_month = end_of_last_month.replace(day=1)
+
+    print(
+        f"--> Filtering for 'Open' cases in: {start_of_last_month.strftime('%B %Y')} ({start_of_last_month.strftime('%Y-%m-%d')} to {end_of_last_month.strftime('%Y-%m-%d')})"
+    )
+
+    # Apply Filters: Date is anywhere in last month AND Status == Open
+    time_condition = (df[DATE_COLUMN] >= start_of_last_month) & (
+        df[DATE_COLUMN] < start_of_this_month
+    )
+    status_condition = (
+        df[STATUS_COLUMN].astype(str).str.strip().str.lower() == "open"
+    )
+
+    filtered_df = df[time_condition & status_condition]
+
+    # Filter out everything except your 8 target columns
+    final_df = filtered_df[COLUMNS_TO_KEEP]
+
+    # Export to Excel
+    final_df.to_excel(OUTPUT_FILE, index=False)
+    print(
+        f"\nSUCCESS! {len(final_df)} cases extracted and saved to '{OUTPUT_FILE}'."
+    )
+
+    # ==========================================
+    # 3. AUTOMATIC EMAIL DRAFTING (OUTLOOK)
+    # ==========================================
+    print("--> Connecting to Outlook to draft email...")
+
+    # Convert the DataFrame into a clean HTML table (border=1 adds basic gridlines)
+    table_html = final_df.to_html(index=False, border=1)
+
+    # Connect to Outlook and create a new Mail Item (0 = Mail)
+    outlook = win32.Dispatch("outlook.application")
+    mail = outlook.CreateItem(0)
+
+    # Assign Email Parameters
+    mail.To = EMAIL_TO
+    if EMAIL_CC:
+        mail.CC = EMAIL_CC
+    mail.Subject = f"{EMAIL_SUBJECT} ({start_of_last_month.strftime('%B %Y')})"
+
+    # Combine the top text, the rendered Excel table, and the bottom text/signature
+    mail.HTMLBody = (
+        f"<html><body>{EMAIL_BODY_TOP}{table_html}{EMAIL_BODY_BOTTOM}</body></html>"
+    )
+
+    # Attach the generated Excel file (Outlook requires the full absolute file path)
+    full_file_path = os.path.abspath(OUTPUT_FILE)
+    mail.Attachments.Add(full_file_path)
+
+    # Display pops up the email draft on your screen for review!
+    mail.Display()
+    print("SUCCESS! Your email draft is now open on your screen.")
+
+except KeyError as e:
+    print(
+        f"\nERROR: A required column header was not found in the Excel file."
+    )
+    print(f"Missing Header Name: {e}")
+    print(
+        "Please double-check that DATE_COLUMN, STATUS_COLUMN, and COLUMNS_TO_KEEP match the spreadsheet exactly."
+    )
+except Exception as e:
+    print(f"\nAn unexpected error occurred: {e}")
