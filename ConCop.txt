@@ -1713,3 +1713,10 @@ except KeyError as e:
     )
 except Exception as e:
     print(f"\nAn unexpected error occurred: {e}")
+
+
+# Sort by Control Location (A-Z), then by End Date (Oldest to Newest)
+    final_df = final_df.sort_values(
+        by=["Control Location", "Monitoring Period End Date"],
+        ascending=[True, True],
+    ) 
