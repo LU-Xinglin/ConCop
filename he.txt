@@ -351,3 +351,19 @@ if __name__ == "__main__":
     ):
         print(f"\nTopic #{topic_id + 1}:")
         print(f"  {words}")
+
+
+custom_stops = {
+    # Existing generic incident wording
+    "issue", "error", "event", "impact", "incident", "occurred",
+    "failed", "failure",
+
+    # Organisation / business-unit identifiers
+    "hsbc", "hsbcnet", "hbuk", "gp", "cib",
+
+    # Generic administrative wording
+    "data", "process", "procedure", "require", "requirement",
+    "review", "open", "inform", "manage", "management",
+    "service", "solution", "global", "client", "customer",
+    "bank", "report", "file", "email",
+}
