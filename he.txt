@@ -367,3 +367,145 @@ custom_stops = {
     "service", "solution", "global", "client", "customer",
     "bank", "report", "file", "email",
 }
+
+
+
+
+"""Create a review workbook of issue descriptions that may be Spanish.
+
+This is intentionally a conservative, offline heuristic.  It flags rows for
+human review; it does not delete or translate anything.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+
+import pandas as pd
+
+
+# Common Spanish function words are much more reliable language signals than
+# business terms such as "banco" or "pago", which could appear in a name.
+SPANISH_MARKERS = {
+    "al",
+    "como",
+    "con",
+    "del",
+    "desde",
+    "el",
+    "en",
+    "entre",
+    "es",
+    "esta",
+    "este",
+    "la",
+    "las",
+    "lo",
+    "los",
+    "más",
+    "para",
+    "pero",
+    "por",
+    "que",
+    "se",
+    "sin",
+    "sobre",
+    "su",
+    "sus",
+    "un",
+    "una",
+    "y",
+}
+
+WORD_PATTERN = re.compile(r"[a-záéíóúüñ]+", flags=re.IGNORECASE)
+
+
+def spanish_markers(text: object) -> list[str]:
+    """Return the distinct Spanish marker words found in a description."""
+    if pd.isna(text):
+        return []
+
+    words = set(WORD_PATTERN.findall(str(text).casefold()))
+    return sorted(words & SPANISH_MARKERS)
+
+
+def build_report(input_path: Path, column: str, output_path: Path) -> None:
+    dataframe = pd.read_excel(input_path)
+
+    if column not in dataframe.columns:
+        available = ", ".join(map(str, dataframe.columns))
+        raise ValueError(
+            f"Column {column!r} was not found. Available columns: {available}"
+        )
+
+    report = dataframe.copy()
+    marker_lists = report[column].apply(spanish_markers)
+    report["spanish_marker_count"] = marker_lists.str.len()
+    report["spanish_markers_found"] = marker_lists.apply(", ".join)
+    # Two or more function words gives a much lower false-positive rate for
+    # short incident descriptions than flagging every isolated word such as
+    # "para" or "del".
+    report["likely_spanish"] = report["spanish_marker_count"] >= 2
+
+    flagged = report.loc[report["likely_spanish"]].copy()
+    summary = pd.DataFrame(
+        {
+            "metric": [
+                "Input rows",
+                "Likely Spanish rows",
+                "Rows not flagged",
+                "Detection rule",
+            ],
+            "value": [
+                len(report),
+                len(flagged),
+                len(report) - len(flagged),
+                "At least two Spanish function-word markers",
+            ],
+        }
+    )
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        summary.to_excel(writer, sheet_name="Summary", index=False)
+        flagged.to_excel(writer, sheet_name="Likely Spanish", index=False)
+        report.to_excel(writer, sheet_name="All rows", index=False)
+
+        for worksheet in writer.sheets.values():
+            worksheet.freeze_panes = "A2"
+            worksheet.auto_filter.ref = worksheet.dimensions
+            for column_cells in worksheet.columns:
+                width = min(
+                    max(len(str(cell.value or "")) for cell in column_cells) + 2,
+                    60,
+                )
+                worksheet.column_dimensions[column_cells[0].column_letter].width = width
+
+    print(f"Rows read: {len(report)}")
+    print(f"Likely Spanish rows: {len(flagged)}")
+    print(f"Review workbook written to: {output_path.resolve()}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Flag likely Spanish issue descriptions for manual review."
+    )
+    parser.add_argument("input_file", type=Path, help="Path to the source Excel workbook")
+    parser.add_argument(
+        "--column",
+        default="Issue Description",
+        help="Description column to inspect (default: Issue Description)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("spanish_description_review.xlsx"),
+        help="Output review workbook (default: spanish_description_review.xlsx)",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    arguments = parse_args()
+    build_report(arguments.input_file, arguments.column, arguments.output)
