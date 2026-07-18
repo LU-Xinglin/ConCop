@@ -1,0 +1,60 @@
+import pandas as pd
+from gensim import corpora
+from gensim.models import LdaModel
+
+from topic_utils import preprocess_text
+
+INPUT_FILE = "new_incidents.xlsx"
+OUTPUT_FILE = "new_incidents_flagged.xlsx"
+TARGET_COLUMN = "Issue Description"
+
+MODEL_FILE = "incident_lda_9_topics.model"
+DICTIONARY_FILE = "incident_dictionary.dict"
+
+
+model = LdaModel.load(MODEL_FILE)
+dictionary = corpora.Dictionary.load(DICTIONARY_FILE)
+
+df = pd.read_excel(INPUT_FILE)
+
+if TARGET_COLUMN not in df.columns:
+    raise ValueError(f"Missing column: {TARGET_COLUMN}")
+
+
+def assign_topic(description):
+    tokens = preprocess_text(description)
+    bow = dictionary.doc2bow(tokens)
+
+    if not bow:
+        return pd.Series({
+            "assigned_topic": "Unassigned",
+            "topic_probability": 0.0,
+            "needs_review": True,
+        })
+
+    probabilities = model.get_document_topics(
+        bow,
+        minimum_probability=0,
+    )
+    probabilities = sorted(
+        probabilities,
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    topic_id, confidence = probabilities[0]
+
+    return pd.Series({
+        "assigned_topic": f"Topic {topic_id + 1}",
+        "topic_probability": round(confidence, 4),
+        "needs_review": confidence < 0.45,
+    })
+
+
+assignments = df[TARGET_COLUMN].apply(assign_topic)
+result = pd.concat([df, assignments], axis=1)
+
+result.to_excel(OUTPUT_FILE, index=False)
+
+print(f"Flagged file written to: {OUTPUT_FILE}")
+print(f"Rows needing review: {result['needs_review'].sum()}")

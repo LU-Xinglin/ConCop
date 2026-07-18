@@ -1,0 +1,67 @@
+import pandas as pd
+from gensim import corpora
+from gensim.models import LdaModel
+
+from topic_utils import preprocess_text
+
+INPUT_FILE = "incidents_cleaned.xlsx"
+TARGET_COLUMN = "Issue Description"
+NUM_TOPICS = 9
+
+MODEL_FILE = "incident_lda_9_topics.model"
+DICTIONARY_FILE = "incident_dictionary.dict"
+
+
+df = pd.read_excel(INPUT_FILE)
+
+df = df.dropna(subset=[TARGET_COLUMN]).copy()
+df[TARGET_COLUMN] = (
+    df[TARGET_COLUMN]
+    .astype(str)
+    .str.replace(r"\s+", " ", regex=True)
+    .str.strip()
+)
+
+df = df[df[TARGET_COLUMN] != ""].copy()
+
+# Train once per unique description.
+training_df = df.drop_duplicates(
+    subset=[TARGET_COLUMN],
+    keep="first",
+).copy()
+
+training_df["tokens"] = training_df[TARGET_COLUMN].apply(preprocess_text)
+training_df = training_df[
+    training_df["tokens"].map(len) > 0
+].copy()
+
+dictionary = corpora.Dictionary(training_df["tokens"])
+dictionary.filter_extremes(no_below=2, no_above=0.65)
+
+corpus = [
+    dictionary.doc2bow(tokens)
+    for tokens in training_df["tokens"]
+]
+
+corpus = [bow for bow in corpus if bow]
+
+model = LdaModel(
+    corpus=corpus,
+    id2word=dictionary,
+    num_topics=NUM_TOPICS,
+    random_state=42,
+    passes=15,
+    alpha="auto",
+)
+
+model.save(MODEL_FILE)
+dictionary.save(DICTIONARY_FILE)
+
+print(f"Saved model: {MODEL_FILE}")
+print(f"Saved dictionary: {DICTIONARY_FILE}")
+
+for topic_id, words in model.print_topics(
+    num_topics=NUM_TOPICS,
+    num_words=10,
+):
+    print(f"\nTopic {topic_id + 1}: {words}")

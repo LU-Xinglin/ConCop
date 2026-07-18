@@ -1,0 +1,35 @@
+import re
+import pandas as pd
+from gensim.parsing.porter import PorterStemmer
+from gensim.parsing.preprocessing import STOPWORDS
+from gensim.utils import simple_preprocess
+
+CUSTOM_STOPS = {
+    "issue", "error", "event", "impact", "incident",
+    "occurred", "failed", "failure",
+    "hsbc", "hsbcnet", "hbuk", "cib",
+    "data", "process", "procedure", "require",
+    "requirement", "review", "open", "inform",
+    "manage", "management", "service",
+}
+
+def preprocess_text(text):
+    if pd.isna(text):
+        return []
+
+    text = str(text)
+    text = re.sub(r"\S*@\S*\s?", " ", text)
+    text = re.sub(r"http\S+", " ", text)
+    text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
+
+    tokens = simple_preprocess(text, deacc=True, min_len=3)
+
+    stop_words = set(STOPWORDS)
+    stop_words.update(CUSTOM_STOPS)
+    stemmer = PorterStemmer()
+
+    return [
+        stemmer.stem(token)
+        for token in tokens
+        if token not in stop_words
+    ]
