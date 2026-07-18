@@ -509,3 +509,15 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     arguments = parse_args()
     build_report(arguments.input_file, arguments.column, arguments.output)
+
+
+
+
+| Topic | Likely label | Assessment |
+|---|---|---|
+| 1 | Pricing, billing, charges, fees | Strong |
+| 4 | Card fraud and transactions | Strong |
+| 5 | Payments and screening | Strong |
+| 6 | Accounts, credit, deposits, debit | Strong |
+| 7 | Regulatory compliance, sanctions, fines | Strong |
+| 8 | Deposits / account terms / legal agreements | Promising |
