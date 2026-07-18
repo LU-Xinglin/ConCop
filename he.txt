@@ -184,3 +184,170 @@ def preprocess_text(text_series: pd.Series) -> list:
 
     lemmatizer = WordNetLemmatizer()
     processed_docs = []
+
+
+
+import re
+import gensim
+import pandas as pd
+from gensim import corpora
+from gensim.models import CoherenceModel, LdaModel
+# 100% Offline Gensim Preprocessing Tools (No downloads required!)
+from gensim.parsing.porter import PorterStemmer
+from gensim.parsing.preprocessing import STOPWORDS
+from gensim.utils import simple_preprocess
+
+
+def load_and_deduplicate_data(filepath: str, col_name: str) -> pd.Series:
+    """Loads Excel data, removes empty rows, and deduplicates identical issue descriptions."""
+    print(f"Loading data from '{filepath}'...")
+    df = pd.read_excel(filepath)
+
+    # 1. Drop rows where the description is missing
+    df = df.dropna(subset=[col_name])
+
+    # 2. Convert to string and strip leading/trailing whitespace
+    df[col_name] = df[col_name].astype(str).str.strip()
+
+    # 3. Filter out rows that became empty strings after stripping
+    df = df[df[col_name] != ""]
+
+    # 4. Deduplicate: Isolates unique issues by dropping repeated impact rows
+    initial_rows = len(df)
+    df = df.drop_duplicates(subset=[col_name], keep="first")
+    unique_issues = len(df)
+
+    print(f"--- Data Ingestion Summary ---")
+    print(f"Total impact rows read : {initial_rows}")
+    print(f"Unique issues isolated : {unique_issues}")
+    print(f"Rows removed (duplicates): {initial_rows - unique_issues}\n")
+
+    return df[col_name]
+
+
+def preprocess_text(text_series: pd.Series) -> list:
+    """Tokenizes, removes stopwords/noise, and stems text using offline Gensim tools."""
+    print("Preprocessing and tokenizing descriptions...")
+
+    # 1. Load Gensim's built-in offline stopword list
+    stop_words = set(STOPWORDS)
+
+    # 2. Add high-frequency operational/business boilerplate words
+    custom_stops = {
+        "issue",
+        "error",
+        "event",
+        "impact",
+        "incident",
+        "occurred",
+        "failed",
+        "failure",
+    }
+    stop_words.update(custom_stops)
+
+    # 3. Initialize Gensim's offline Porter Stemmer
+    stemmer = PorterStemmer()
+    processed_docs = []
+
+    for text in text_series:
+        # Remove email addresses, file paths, URLs, and special characters
+        text = re.sub(r"\S*@\S*\s?", "", text)
+        text = re.sub(r"http\S+", "", text)
+        text = re.sub(r"[^a-zA-Z\s]", " ", text)
+
+        # Tokenize into words (converts to lowercase, ignores words < 3 chars)
+        tokens = simple_preprocess(text, deacc=True, min_len=3)
+
+        # Remove stopwords and reduce words to their root stem (e.g., 'reporting' -> 'report')
+        clean_tokens = [
+            stemmer.stem(token)
+            for token in tokens
+            if token not in stop_words
+        ]
+
+        if clean_tokens:  # Only append non-empty document arrays
+            processed_docs.append(clean_tokens)
+
+    return processed_docs
+
+
+def train_and_evaluate_lda(
+    dictionary, corpus, texts, start_k=2, max_k=16, step=2
+) -> tuple:
+    """Trains LDA models across a range of topic counts and finds the best Cv Coherence score."""
+    coherence_scores = []
+    models = []
+
+    print(f"Searching for optimal topic count between k={start_k} and k={max_k}...")
+
+    for num_topics in range(start_k, max_k + 1, step):
+        # Initialize and train LDA model
+        model = LdaModel(
+            corpus=corpus,
+            id2word=dictionary,
+            num_topics=num_topics,
+            random_state=42,  # Fixed seed for reproducibility
+            update_every=1,
+            chunksize=100,
+            passes=15,
+            alpha="auto",
+            per_word_topics=True,
+        )
+        models.append(model)
+
+        # Calculate Cv Coherence Score
+        coherence_model = CoherenceModel(
+            model=model, texts=texts, dictionary=dictionary, coherence="c_v"
+        )
+        score = coherence_model.get_coherence()
+        coherence_scores.append(score)
+
+        print(f"  -> k={num_topics:02d} topics | Coherence (C_v): {score:.4f}")
+
+    # Locate the best model based on the highest Cv score
+    best_idx = coherence_scores.index(max(coherence_scores))
+    best_model = models[best_idx]
+    best_k = start_k + (best_idx * step)
+
+    print(
+        f"\nOptimal Model Selected: k={best_k} topics (Coherence = {max(coherence_scores):.4f})"
+    )
+    return best_model, best_k
+
+
+# --- Main Execution Pipeline ---
+if __name__ == "__main__":
+    # 1. Configuration
+    FILE_PATH = "incidents.xlsx"  # Replace with your actual file path
+    TARGET_COLUMN = "Issue Description"
+
+    # 2. Ingest and Deduplicate
+    unique_descriptions = load_and_deduplicate_data(FILE_PATH, TARGET_COLUMN)
+
+    # 3. Clean and Tokenize (100% Offline)
+    tokenized_docs = preprocess_text(unique_descriptions)
+
+    # 4. Build Vocabulary Dictionary and Bag-of-Words Corpus
+    id2word = corpora.Dictionary(tokenized_docs)
+
+    # Filter extremes: ignore words in < 2 issues or in > 75% of all issues
+    id2word.filter_extremes(no_below=2, no_above=0.75)
+    corpus = [id2word.doc2bow(text) for text in tokenized_docs]
+
+    # 5. Optimize and Train LDA
+    best_lda, optimal_k = train_and_evaluate_lda(
+        dictionary=id2word,
+        corpus=corpus,
+        texts=tokenized_docs,
+        start_k=4,  # Adjust search range based on expected complexity
+        max_k=14,
+        step=2,
+    )
+
+    # 6. Output the Discovered Topic Clusters
+    print(f"\n--- Top Keywords for the {optimal_k} Discovered Topics ---")
+    for topic_id, words in best_lda.print_topics(
+        num_topics=optimal_k, num_words=10
+    ):
+        print(f"\nTopic #{topic_id + 1}:")
+        print(f"  {words}")
