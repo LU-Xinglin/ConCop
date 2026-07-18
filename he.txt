@@ -164,3 +164,23 @@ if __name__ == "__main__":
     ):
         print(f"\nTopic #{topic_id + 1}:")
         print(f"  {words}")
+
+
+
+
+
+def preprocess_text(text_series: pd.Series) -> list:
+    print("Preprocessing and tokenizing descriptions...")
+    
+    # Use scikit-learn's built-in offline stopword list
+    stop_words = set(ENGLISH_STOP_WORDS)
+
+    # Add high-frequency operational boilerplate words
+    custom_stops = {
+        "issue", "error", "event", "impact", 
+        "incident", "occurred", "failed", "failure"
+    }
+    stop_words.update(custom_stops)
+
+    lemmatizer = WordNetLemmatizer()
+    processed_docs = []
