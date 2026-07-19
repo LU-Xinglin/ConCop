@@ -521,3 +521,64 @@ if __name__ == "__main__":
 | 6 | Accounts, credit, deposits, debit | Strong |
 | 7 | Regulatory compliance, sanctions, fines | Strong |
 | 8 | Deposits / account terms / legal agreements | Promising |
+
+
+
+
+Yes—your clarified approach is sensible. The key is that you are not using the model to *exclude* incidents; you are using it to separate easy cases from cases needing human review.
+
+Think of it as a three-stage workflow:
+
+| Outcome | Rule | Treatment |
+|---|---|---|
+| Auto-classified | Topic is meaningful, probability is very high, and clearly above the second-best topic | Include in the category summary |
+| Ambiguous | Meaningful topic, but probability or separation is not high enough | Send for human review |
+| Unclear / weak topic | Dominant topic has no agreed business meaning | Send for human review |
+
+For example:
+
+```text
+Auto-classify as “Sanctions screening” only when:
+- Topic 13 is the dominant topic;
+- Topic 13 probability >= 0.80; and
+- Topic 13 probability exceeds the second-highest topic by >= 0.20.
+
+Otherwise: manual review.
+```
+
+The top-two margin matters. A row with Topic 13 at 82% and the next topic at 5% is much clearer than one with Topic 13 at 82% and another topic at 17%.
+
+For your purpose—counting how many incidents fall into each category for a period—the final count should be:
+
+```text
+Final category count
+= high-confidence model assignments
++ reviewer-confirmed assignments from the review queue
+```
+
+This protects against false negatives because you do **not** discard low-confidence rows or rows assigned to weak topics. They remain in the manual-review population, where a reviewer can identify an incident that belongs to a category of interest.
+
+The important distinction is:
+
+- If you report only the high-confidence model assignments, you will undercount categories. That is acceptable only as a “minimum confirmed count.”
+- If you report the high-confidence assignments plus reviewed residual cases, you can produce a reliable final summary.
+
+Before doing this, define a simple mapping from meaningful LDA topics to business categories, for example:
+
+```text
+Topic 1  → Card fraud / payment authentication
+Topic 2  → Deposit and account products
+Topic 4  → Payment processing / beneficiary issues
+Topic 9  → Pricing, fees, and billing
+Topic 10 → Regulatory compliance
+Topic 13 → Sanctions screening
+```
+
+Do not force weak topics such as #5, #6, #7, or #11 into a category. Put their rows directly into review.
+
+One final nuance: LDA is naturally multi-topic. An incident may genuinely involve, for example, payment processing *and* sanctions screening. Decide whether your reporting needs:
+
+- one **primary** category per incident; or
+- multiple category tags, where one incident can appear in more than one summary count.
+
+For management summaries, I would normally choose one primary category plus optional secondary tags.
