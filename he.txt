@@ -582,3 +582,58 @@ One final nuance: LDA is naturally multi-topic. An incident may genuinely involv
 - multiple category tags, where one incident can appear in more than one summary count.
 
 For management summaries, I would normally choose one primary category plus optional secondary tags.
+
+
+
+
+
+
+You are analyzing a customer survey Excel file.
+
+Objective:
+Compare selected customer survey metrics between 2024 and 2025, identify meaningful changes, and summarize the results for business stakeholders.
+
+File structure:
+- Each row represents [a customer / response / account / region].
+- Columns contain customer attributes and survey metrics.
+- Metrics may appear as paired columns, such as:
+  - Customer Satisfaction 2024
+  - Customer Satisfaction 2025
+  - Recommendation Score 2024
+  - Recommendation Score 2025
+- The unique record identifier is: [column name].
+- Relevant grouping columns are: [region, segment, product, etc.].
+
+Metrics to analyze:
+1. [Metric name]: 2024 column = [exact column name]; 2025 column = [exact column name]
+2. [Metric name]: 2024 column = [exact column name]; 2025 column = [exact column name]
+3. [Metric name]: 2024 column = [exact column name]; 2025 column = [exact column name]
+
+Instructions:
+1. First inspect and report the workbook structure, including sheet names, row counts, column names, data types, and missing-value counts for the selected columns.
+2. Confirm that each 2024 metric is correctly paired with its 2025 counterpart. Do not infer column pairings when the names are ambiguous; flag them instead.
+3. For each metric, calculate:
+   - Number of valid responses in each year
+   - Mean, median, and standard deviation, where appropriate
+   - Absolute change: 2025 minus 2024
+   - Percentage change, where mathematically appropriate
+   - Distribution or response-rate changes for categorical or rating-scale data
+4. Use matched-record comparisons when the same customers or respondents can be identified across both years. Report how many records were matched.
+5. If the samples are not matched, analyze the years as independent samples and clearly state this limitation.
+6. Exclude blanks and invalid values from calculations. Do not silently convert or recode values.
+7. Preserve the original scale. For example, do not treat a 1–5 rating as a percentage unless explicitly requested.
+8. Identify the largest increases, decreases, and notable subgroup differences.
+9. Distinguish statistical significance from practical significance. If statistical testing is appropriate, state the test used, assumptions, sample size, and p-value. Do not claim a change is significant without sufficient evidence.
+10. Do not infer causes from the survey data. Clearly label possible explanations as hypotheses.
+
+Output:
+A. Data-quality and structure summary
+B. Executive summary in 5–8 bullets
+C. Overall comparison table with:
+   Metric | 2024 result | 2025 result | Absolute change | Percentage-point change or percentage change | Valid n | Interpretation
+D. Subgroup comparison tables for [specified grouping columns]
+E. Key findings and possible hypotheses
+F. Limitations, assumptions, and unresolved data issues
+G. Recommended follow-up analyses
+
+Use exact column names in the analysis. Show formulas or calculation logic for derived fields. Round reported values to [one/two] decimal places, but retain full precision in calculations.
